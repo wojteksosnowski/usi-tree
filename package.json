@@ -1,0 +1,86 @@
+{
+  "name": "usi-tree",
+  "version": "0.1.0",
+  "description": "Open standard for dendrological tree description (UsiTreeSpec v1), zero-dependency 3D procedural skeleton & mesh generator, and inverse procedural modeling toolkit (TreeFit).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "usi-tree": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./three": {
+      "types": "./dist/three/index.d.ts",
+      "import": "./dist/three/index.js"
+    },
+    "./profiles": {
+      "types": "./dist/profiles/index.d.ts",
+      "import": "./dist/profiles/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    },
+    "./fitter": {
+      "types": "./dist/fitter/index.d.ts",
+      "import": "./dist/fitter/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "schema",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "tree",
+    "procedural-generation",
+    "dendrology",
+    "3d",
+    "threejs",
+    "cad",
+    "bim",
+    "gis",
+    "weber-penn",
+    "inverse-procedural-modeling",
+    "usi-tree"
+  ],
+  "peerDependencies": {
+    "three": ">=0.150.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.183.1",
+    "three": "^0.183.2",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wojteksosnowski/usi-tree.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wojteksosnowski/usi-tree/issues"
+  },
+  "homepage": "https://github.com/wojteksosnowski/usi-tree#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

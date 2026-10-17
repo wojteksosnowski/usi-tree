@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usi-tree.org/schema/v1/tree.schema.json",
+  "title": "USI Tree Standard Specification v1.0",
+  "description": "Open declarative standard for dendrological, biomechanical, and procedural 3D tree description.",
+  "type": "object",
+  "required": [
+    "version",
+    "taxonomy",
+    "ontogeny"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "taxonomy": {
+      "type": "object",
+      "required": [
+        "id",
+        "genus",
+        "leafType"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "genus": {
+          "type": "string"
+        },
+        "speciesLatin": {
+          "type": "string"
+        },
+        "commonNames": {
+          "type": "object",
+          "properties": {
+            "pl": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "en": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "de": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "leafType": {
+          "enum": [
+            "broadleaved",
+            "needleleaved"
+          ]
+        },
+        "leafCycle": {
+          "enum": [
+            "deciduous",
+            "evergreen",
+            "semi-deciduous"
+          ]
+        }
+      }
+    },
+    "biomechanics": {
+      "type": "object",
+      "properties": {
+        "apicalDominance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "taperRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "gnarliness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fiberTwist": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "junctionType": {
+          "enum": [
+            "U",
+            "V",
+            "UV"
+          ]
+        },
+        "buttressing": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "flutingLobes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        }
+      }
+    },
+    "ontogeny": {
+      "type": "object",
+      "required": [
+        "form",
+        "defaultProfile"
+      ],
+      "properties": {
+        "form": {
+          "enum": [
+            "SINGLE",
+            "FORKED",
+            "MULTI"
+          ]
+        },
+        "keepShape": {
+          "type": "boolean"
+        },
+        "defaultProfile": {
+          "type": "object"
+        },
+        "heightAnchors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "h",
+              "profile"
+            ],
+            "properties": {
+              "h": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "profile": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "barkColorHex": {
+          "type": "string"
+        },
+        "leafToneShift": {
+          "type": "object",
+          "required": [
+            "hue",
+            "saturation",
+            "lightness"
+          ],
+          "properties": {
+            "hue": {
+              "type": "number"
+            },
+            "saturation": {
+              "type": "number"
+            },
+            "lightness": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}
