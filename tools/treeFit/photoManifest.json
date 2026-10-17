@@ -1,0 +1,27 @@
+{
+  "brzoza": {
+    "note": "Zdjęcia bez wysokości w nazwie — przypisane wg nazw profili (6 m: jedyne pozostałe)",
+    "photoHeights": { "pokroj": 15, "zwisajaca": 9, "jesien": 6 }
+  },
+  "kasztanowiec": {
+    "note": "group-aesculus: dwa drzewa w kadrze",
+    "exclude": ["group-aesculus"]
+  },
+  "sosna": {
+    "note": "Pokrój leśny: wysoki oczyszczony pień, wąska korona w górnej części (286342277: trzy drzewa w kadrze)",
+    "exclude": ["286342277", "1279125788", "408067317", "261293912"]
+  },
+  "sosna_samotna": {
+    "note": "Sufiks -9m w nazwie błędny — drzewa ok. 15 m",
+    "photoHeights": { "408067317": 15, "261293912": 15 },
+    "exclude": ["286342277", "depositphotos", "sosna_zwyczajna", "2BND81T", "PK507W", "177301939"]
+  },
+  "topola_wloska": {
+    "note": "Grupa kilku drzew",
+    "exclude": ["8a6ba9d59de845dbfc3485617fb1723d"]
+  },
+  "osika": {
+    "note": "Trzy drzewa w kadrze",
+    "exclude": ["815811344"]
+  }
+}
