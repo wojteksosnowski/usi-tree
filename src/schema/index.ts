@@ -1,7 +1,7 @@
 /**
  * USI Tree Standard v1.0 — Declarative Open Specification for Dendrological & Procedural 3D Trees
  */
-import type { SpeciesProfile, TreeSpecies, TreeStroke, TrunkForm } from '../core/TreeGenerator.js';
+import type { SpeciesProfile, TreeSpecies, TreeStroke, TrunkForm } from '../core/types.js';
 import type { HeightAnchor } from '../core/heightProfile.js';
 import type { LeafToneShift } from '../core/treeSpeciesRegistry.js';
 import { profileAtHeight } from '../core/heightProfile.js';

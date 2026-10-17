@@ -11,7 +11,7 @@
  *
  * Bez three: moduł wolno importować poza leniwym widokiem 3D.
  */
-import type { BranchLevelParams, SpeciesProfile } from './TreeGenerator.js';
+import type { BranchLevelParams, SpeciesProfile } from './types.js';
 
 export interface HeightAnchor {
   h: number;
@@ -34,8 +34,8 @@ const PARAM_LIMITS: Partial<Record<ProfileNumericKey, [number, number]>> = {
   twigStroke: [0.2, 1.5],
   limbBreakProbability: [0, 0.5],
   trunkForkTropism: [0.5, 12],
-  trunkForkSideLength: [0.3, 1],
-  trunkForkSideRadius: [0.2, 0.95],
+  trunkForkSideLength: [0.4, 1.4],
+  trunkForkSideRadius: [0.3, 1.3],
   trunkForkMainAngleScale: [0, 2],
   trunkLeanScale: [0, 2],
   crownAsymmetry: [0, 0.9],

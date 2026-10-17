@@ -1,0 +1,20 @@
+{
+  "name": "Betula pendula — brzoza brodawkowata, soliter ~18–20 m (opis Sapling Tree Gen)",
+  "shape": "Tend Flame",
+  "baseSize": 0.28,
+  "secondaryBaseSize": 0.25,
+  "splitHeight": 0.65,
+  "splitAngle": 12,
+  "length":     [1.00, 0.38, 0.45, 0.65],
+  "lengthV":    [0.05, 0.15, 0.20, 0.25],
+  "branches":   [0, 26, 14, 30],
+  "curveRes":   [16, 12, 10, 12],
+  "downAngle":  [0.0, 38.0, 45.0, 65.0],
+  "downAngleV": [0.0, -8.0, 12.0, 15.0],
+  "rotate":     [0.0, 137.5, 137.5, 120.0],
+  "rotateV":    [0.0, 20.0, 35.0, 40.0],
+  "curve":      [4.0, -15.0, 45.0, 115.0],
+  "curveV":     [6.0, 10.0, 15.0, 25.0],
+  "curveBack":  [-3.0, 25.0, 15.0, 0.0],
+  "baseSizeLevels": [0, 0.28, 0.30, 0.18]
+}

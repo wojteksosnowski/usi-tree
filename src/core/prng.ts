@@ -10,6 +10,31 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+/** Szybki obiektowy wrapper na generator liczb pseudolosowych z pomocniczymi zakresami */
+export class FastPrng {
+  readonly next: () => number;
+
+  constructor(seed: number) {
+    this.next = mulberry32(seed >>> 0 || 0x12345678);
+  }
+
+  range(min: number, max: number): number {
+    return min + this.next() * (max - min);
+  }
+
+  signedRange(magnitude: number): number {
+    return (this.next() * 2 - 1) * magnitude;
+  }
+}
+
+/** Deterministyczny hash pozycji i poziomu gałęzi (nie zaburza głównego strumienia PRNG) */
+export function stemHash(ox: number, oy: number, oz: number, level: number): number {
+  let h = (Math.round(ox * 1000) * 73856093) ^ (Math.round(oy * 1000) * 19349663) ^ (Math.round(oz * 1000) * 83492791) ^ (level * 2654435761);
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 /** Stabilny 32-bitowy hash FNV-1a łańcucha znaków. */
 export function hashString(str: string): number {
   let hash = 2166136261;

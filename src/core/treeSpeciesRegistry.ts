@@ -5,7 +5,7 @@
  *
  * Bez three: moduł wolno importować poza leniwym widokiem 3D (strażnik `lazy3d.guard.test.ts`).
  */
-import type { SpeciesProfile, TreeSpecies, TrunkForm } from './TreeGenerator.js';
+import type { SpeciesProfile, TreeSpecies, TrunkForm } from './types.js';
 import FITTED_PROFILES from './fittedProfiles.json' with { type: 'json' };
 import { profileAtHeight, type HeightAnchor } from './heightProfile.js';
 

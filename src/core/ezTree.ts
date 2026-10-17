@@ -15,36 +15,8 @@
  * „płynne gałązki” jako mniejsze falowanie.
  */
 import { Vec3, Quat, EulerXYZ } from './vec3Math.js';
-import type { Stem, TrunkForm } from './TreeGenerator.js';
-
-type ByLevel = Record<number, number>;
-
-export interface EzTreeOptions {
-  type: 'deciduous' | 'evergreen';
-  branch: {
-    levels: number;
-    angle: ByLevel;       // kąt dziecka względem rodzica (stopnie), poziomy 1..
-    children: ByLevel;    // liczba dzieci na pędzie danego poziomu
-    force: { direction: { x: number; y: number; z: number }; strength: number };
-    gnarliness: ByLevel;  // falowanie (rad na sekcję, ×max(1, 1/√r))
-    length: ByLevel;
-    radius: ByLevel;      // poziom 0: promień pnia; dalej ułamek promienia rodzica w punkcie odgałęzienia
-    sections: ByLevel;
-    segments: ByLevel;
-    start: ByLevel;       // początek odgałęzień na rodzicu (ułamek długości)
-    taper: ByLevel;
-    twist: ByLevel;
-  };
-  leaves: { angle: number; count: number; start: number; size: number; sizeVariance: number };
-  /**
-   * Rozszerzenie (poza ez-tree): pokrój rozpierzchły bez przewodnika — krótki pień do wysokości `height`
-   * (ułamek długości pnia) rozwidla się na `count` konarów głównych odchylonych o `lean` ± `leanV` stopni
-   * (wierzba, wiąz). Konary rosną jak pnie poziomu 0, każdy z ułamkiem dzieci.
-   */
-  scaffold?: { count: number; height: number; lean: number; leanV: number };
-  /** Rozszerzenie: wykładnik modelu rur (2 = da Vinci; większy = cieńszy pień przy wielu gałązkach), domyślnie 2,5 */
-  pipeExponent?: number;
-}
+import type { Stem, TrunkForm, EzTreeOptions } from './types.js';
+export type { EzTreeOptions };
 
 export interface EzSkeleton {
   stems: Stem[];

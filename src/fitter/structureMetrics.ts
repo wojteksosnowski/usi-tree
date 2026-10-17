@@ -2,7 +2,7 @@
  * Miary struktury szkieletu („wskaźnik granatu”): to, czego sylwetka nie widzi — chaos wewnątrz korony.
  * Liczone na szkielecie w skali nominalnej (wysokość ≈ 1), bez rastra.
  */
-import type { TreeSkeleton } from '../core/TreeGenerator.js';
+import type { TreeSkeleton } from '../core/types.js';
 
 export interface StructureMetrics {
   clipped: number;  // udział gałęzi uciętych na obwiedni korony

@@ -1,5 +1,6 @@
 import FITTED_PROFILES_RAW from '../core/fittedProfiles.json' with { type: 'json' };
-import { SPECIES_PROFILES, type SpeciesProfile, type TreeSpecies, type TrunkForm } from '../core/TreeGenerator.js';
+import { SPECIES_PROFILES } from '../core/speciesProfiles.js';
+import type { SpeciesProfile, TreeSpecies, TrunkForm } from '../core/types.js';
 import type { HeightAnchor } from '../core/heightProfile.js';
 import { leafToneShift, type TreeKind } from '../core/treeSpeciesRegistry.js';
 import { USI_TREE_SCHEMA_URI, type UsiTreeSpecV1 } from '../schema/index.js';

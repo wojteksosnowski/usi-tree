@@ -69,7 +69,25 @@ export {
 export {
   mulberry32,
   hashString,
+  FastPrng,
+  stemHash,
 } from './core/prng.js';
+
+export {
+  GrowableBuffer,
+  MeshBufferBuilder,
+} from './core/meshBuilder.js';
+
+export {
+  CrownEnvelope,
+  crownRatio,
+  crownShapeRatio,
+} from './core/crownEnvelope.js';
+
+export {
+  growBotanicalTree,
+  GrowthContext,
+} from './core/growthEngine.js';
 
 export {
   USI_TREE_SCHEMA_URI,
