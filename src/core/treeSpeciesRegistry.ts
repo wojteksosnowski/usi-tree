@@ -16,6 +16,7 @@ export type FittedTreeRef =
   | 'Horsechestnut'
   | 'Linden'
   | 'Sycamore'
+  | 'Oak'
   | 'Quaking Aspen'
   | 'Weeping Willow'
   | 'Viburnum'
@@ -85,6 +86,7 @@ const NEUTRAL_LEAF_SHIFT: LeafToneShift = { hue: 0, saturation: 1, lightness: 1 
 const LEAF_TONE_SHIFTS: Partial<Record<TreeKind, LeafToneShift>> = {
   // ciemne, głębokie, pełne zielenie
   OAK: { hue: 4, saturation: 0.95, lightness: 0.72 },
+  Oak: { hue: 4, saturation: 0.95, lightness: 0.72 },
   Horsechestnut: { hue: 6, saturation: 1.1, lightness: 0.72 },
   Elm: { hue: 2, saturation: 0.9, lightness: 0.84 },
   ASH: { hue: 4, saturation: 0.9, lightness: 0.94 },
@@ -129,7 +131,7 @@ export interface TreeKindSource {
 }
 
 const SAMPLER_SPECIES: Record<string, TreeKind> = {
-  OAK: 'OAK',
+  OAK: 'Oak',
   BIRCH: 'BIRCH',
   MAPLE: 'Sycamore',
   PINE: 'PINE',
@@ -140,7 +142,7 @@ const SAMPLER_SPECIES: Record<string, TreeKind> = {
 const RULES: { genera: string[]; words: string[]; kind: TreeKind }[] = [
   { genera: ['pinus'], words: ['sosna'], kind: 'PINE' },
   { genera: ['picea', 'abies', 'larix', 'pseudotsuga', 'thuja', 'juniperus', 'taxus', 'chamaecyparis'], words: ['świerk', 'swierk', 'jodł', 'jodl', 'modrzew', 'żywotnik', 'jałowiec', 'cis '], kind: 'SPRUCE' },
-  { genera: ['quercus'], words: ['dąb', 'dab '], kind: 'OAK' },
+  { genera: ['quercus'], words: ['dąb', 'dab '], kind: 'Oak' },
   { genera: ['betula'], words: ['brzoz'], kind: 'BIRCH' },
   { genera: ['fagus', 'carpinus'], words: ['buk', 'grab'], kind: 'Beech' },
   { genera: ['ulmus'], words: ['wiąz', 'wiaz'], kind: 'Elm' },

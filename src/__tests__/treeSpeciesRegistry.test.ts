@@ -4,7 +4,7 @@ import { SPECIES_PROFILES } from '../core/TreeGenerator.js';
 
 describe('rejestr rodzajów drzew 3D', () => {
   it('rodzaj łaciński i nazwa polska prowadzą do gatunku generatora albo dopasowanego profilu', () => {
-    expect(resolveTreeKind({ genus: 'Quercus' })).toBe('OAK');
+    expect(resolveTreeKind({ genus: 'Quercus' })).toBe('Oak');
     expect(resolveTreeKind({ nameLatin: 'Tilia cordata' })).toBe('Linden');
     expect(resolveTreeKind({ namePolish: 'klon zwyczajny' })).toBe('Sycamore');
     expect(resolveTreeKind({ genus: 'Salix', nameLatin: 'Salix babylonica' })).toBe('Weeping Willow');
