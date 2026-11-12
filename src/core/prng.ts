@@ -13,9 +13,23 @@ export function mulberry32(seed: number): () => number {
 /** Szybki obiektowy wrapper na generator liczb pseudolosowych z pomocniczymi zakresami */
 export class FastPrng {
   readonly next: () => number;
+  private a: number;
 
   constructor(seed: number) {
-    this.next = mulberry32(seed >>> 0 || 0x12345678);
+    // Ten sam ciąg co `mulberry32`; stan jawny, żeby dało się go przesunąć o `n` losowań w O(1)
+    this.a = (seed >>> 0 || 0x12345678) >>> 0;
+    this.next = () => {
+      this.a = (this.a + 0x6d2b79f5) >>> 0;
+      let t = this.a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** Pomija `n` losowań (stan mulberry32 rośnie o stałą na losowanie) */
+  skip(n: number): void {
+    this.a = (this.a + Math.imul(n, 0x6d2b79f5)) >>> 0;
   }
 
   range(min: number, max: number): number {

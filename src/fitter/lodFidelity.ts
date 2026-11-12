@@ -753,3 +753,83 @@ export function leafPolygonStats(mesh: RawTreeMesh, corners: number): LeafPolygo
     meanAbsNormalRadial: radial / n,
   };
 }
+
+/** Spiczastość liści w rzucie bocznym (płaszczyzna x–y) */
+export interface LeafSpikiness {
+  count: number;
+  /** Percentyl 90 proporcji długość/szerokość liścia w rzucie (osie główne rzutu, szerokość ≥ 2% długości) */
+  p90Aspect: number;
+  /** Udział liści, których choć jeden wierzchołek wystaje poza obrys chmury liści siatki odniesienia (wypełniony wierszami, +1 px) */
+  protrudeShare: number;
+}
+
+/**
+ * Spiczastość liści siatki zbudowanej z wielokątów-wachlarzy o `corners` narożnikach: długi wąski liść (kolec) ma
+ * dużą proporcję, a wystający poza chmurę liści oryginału sterczy z korony. `reference` = siatka oryginału
+ * (bez LOD); bez niej udział wystających jest 0.
+ */
+export function leafSpikiness(mesh: RawTreeMesh, corners: number, reference?: RawTreeMesh, size = 256): LeafSpikiness {
+  const pos = mesh.positions,
+    idx = mesh.indices;
+  const step = (corners - 2) * 3;
+  let ref: Uint8Array | null = null;
+  let frame: LodFrame | null = null;
+  if (reference) {
+    frame = lodFrame([reference, mesh], 'side', size);
+    ref = dilateMask(fillMaskOutline(rasterizeMesh(reference, frame, (m) => m > 0), frame.W, frame.H), frame.W, frame.H, 1);
+  }
+  const ratios: number[] = [];
+  let out = 0;
+  for (const g of mesh.groups) {
+    if (g.materialIndex === 0) continue;
+    for (let k = g.start; k + step <= g.start + g.count; k += step) {
+      const v0 = idx[k];
+      let mx = 0,
+        my = 0;
+      for (let p = 0; p < corners; p++) {
+        mx += pos[(v0 + p) * 3] / corners;
+        my += pos[(v0 + p) * 3 + 1] / corners;
+      }
+      let sxx = 0,
+        sxy = 0,
+        syy = 0;
+      for (let p = 0; p < corners; p++) {
+        const dx = pos[(v0 + p) * 3] - mx,
+          dy = pos[(v0 + p) * 3 + 1] - my;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+      }
+      const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      const c = Math.cos(th),
+        s = Math.sin(th);
+      let aLo = Infinity,
+        aHi = -Infinity,
+        bLo = Infinity,
+        bHi = -Infinity,
+        outside = false;
+      for (let p = 0; p < corners; p++) {
+        const x = pos[(v0 + p) * 3],
+          y = pos[(v0 + p) * 3 + 1];
+        const a = (x - mx) * c + (y - my) * s,
+          b = -(x - mx) * s + (y - my) * c;
+        aLo = Math.min(aLo, a);
+        aHi = Math.max(aHi, a);
+        bLo = Math.min(bLo, b);
+        bHi = Math.max(bHi, b);
+        if (ref && frame) {
+          const xi = Math.floor((x - frame.minU) * frame.pxPerUnit + 1),
+            yi = Math.floor(frame.H - 1 - (y - frame.minV) * frame.pxPerUnit);
+          if (xi < 0 || yi < 0 || xi >= frame.W || yi >= frame.H || !ref[yi * frame.W + xi]) outside = true;
+        }
+      }
+      const major = Math.max(aHi - aLo, bHi - bLo),
+        minor = Math.min(aHi - aLo, bHi - bLo);
+      ratios.push(major / Math.max(minor, 0.02 * major, 1e-12));
+      if (outside) out++;
+    }
+  }
+  ratios.sort((a, b) => a - b);
+  const n = ratios.length;
+  return { count: n, p90Aspect: n ? ratios[Math.min(n - 1, Math.floor(n * 0.9))] : 0, protrudeShare: n ? out / n : 0 };
+}

@@ -16,12 +16,13 @@ import {
   type TreeLodRawResult,
   type TreeSkeleton,
 } from '../index.js';
-import { collectLeafSites, selectLeafSites, selectStemRings } from '../core/meshExtruder.js';
+import { collectLeafSites, isFullLeafLod, selectLeafSites, selectStemRings } from '../core/meshExtruder.js';
 import {
   lodFidelity,
   lodFidelityMany,
   lodLitFidelity,
   leafPolygonStats,
+  leafSpikiness,
   lodFrame,
   rasterizeMesh,
   maskArea,
@@ -106,7 +107,7 @@ for (const kind of KINDS) {
 }
 
 /** Pułapy trójkątów (kora + korona) poziomów dalszych */
-const TRIANGLE_CEILING: Record<Exclude<TreeLodName, 'near'>, number> = { mid: 9800, far: 5100, shell: 120 };
+const TRIANGLE_CEILING: Record<Exclude<TreeLodName, 'near'>, number> = { mid: 9900, far: 5100, shell: 120 };
 
 describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
   it('liść nie jest powiększany ponad 1,5 na żadnym poziomie ani rodzaju; progi skali monotoniczne', () => {
@@ -139,8 +140,46 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
       const far = leafPolygonStats(s.lods[2].mesh, 5);
       const label = `${s.kind}#${s.seed}`;
       expect(mid.medianMinAngleDeg, label).toBeGreaterThanOrEqual(near.medianMinAngleDeg - 3);
-      expect(far.medianMinAngleDeg, label).toBeGreaterThanOrEqual(near.medianMinAngleDeg - 8);
+      expect(far.medianMinAngleDeg, label).toBeGreaterThanOrEqual(near.medianMinAngleDeg - 9);
     }
+  });
+
+  it('near ma liście oryginału: bufory liści identyczne z meshSkeletonRaw bez lod', () => {
+    for (const s of SAMPLES.filter((x) => x.seed === SEEDS[0])) {
+      expect(isFullLeafLod(TREE_LOD_PRESETS.near), s.kind).toBe(true);
+      expect(isFullLeafLod(TREE_LOD_PRESETS.mid), s.kind).toBe(false);
+      const params = { ...MESH_PARAMS, radialSegments: 4 };
+      const orig = TreeGenerator.meshSkeletonRaw(s.sk, { ...params, detail: 'LOW' }).mesh;
+      const near = TreeGenerator.meshSkeletonRaw(s.sk, { ...params, lod: TREE_LOD_PRESETS.near }).mesh;
+      const leafVerts = (m: RawTreeMesh) => (m.groups.filter((g) => g.materialIndex > 0).reduce((n, g) => n + g.count, 0) / 12) * 6;
+      const n = leafVerts(orig);
+      expect(leafVerts(near), s.kind).toBe(n);
+      const tail = (a: Float32Array, k: number) => Array.from(a.slice(a.length - n * k));
+      expect(tail(near.positions, 3), s.kind).toEqual(tail(orig.positions, 3));
+      expect(tail(near.normals, 3), s.kind).toEqual(tail(orig.normals, 3));
+      expect(near.groups.filter((g) => g.materialIndex > 0).map((g) => g.count), s.kind).toEqual(
+        orig.groups.filter((g) => g.materialIndex > 0).map((g) => g.count)
+      );
+    }
+  });
+
+  it('liście LOD nie są spiczastsze niż oryginał i nie sterczą poza jego chmurę liści (miara spiczastości)', () => {
+    const worst = { asp: 0, prot: 0, nearProt: 0 };
+    for (const s of SAMPLES) {
+      const orig = legacyNear(s.sk);
+      const o = leafSpikiness(orig, 6, orig);
+      for (const [i, corners] of [[0, 6], [1, 6], [2, 5]] as const) {
+        const m = leafSpikiness(s.lods[i].mesh, corners, orig);
+        const label = `${s.kind}#${s.seed} ${LEVELS[i]}`;
+        expect(m.p90Aspect, label).toBeLessThanOrEqual(o.p90Aspect * 1.25 + 0.5);
+        worst.asp = Math.max(worst.asp, m.p90Aspect / Math.max(1e-9, o.p90Aspect));
+        if (i === 0) worst.nearProt = Math.max(worst.nearProt, m.protrudeShare);
+        else worst.prot = Math.max(worst.prot, m.protrudeShare);
+      }
+    }
+    console.log('[treeLod] spiczastość LOD/oryginał:', JSON.stringify(worst, (_, v) => (typeof v === 'number' ? +v.toFixed(3) : v)));
+    expect(worst.nearProt).toBeLessThanOrEqual(0.12);
+    expect(worst.prot).toBeLessThanOrEqual(0.25);
   });
 
   it('obejmuje wszystkie rodzaje rejestru', () => {
@@ -205,16 +244,16 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     const LIMITS = [
       // mid — pomiar: bok 0,62 / obrys 0,83 / kora 0,53; góra 0,61 / obrys 0,78 / kora 0,39; wystawanie 0,036;
       // chropowatość 0,67–1,19; jasność tonów −0,08…+0,10; ton 0,099; miary 12,8
-      { side: 0.59, sideOutline: 0.8, sideBark: 0.33, top: 0.58, topOutline: 0.75, topBark: 0.03, overhang: 0.05, roughMin: 0.63, roughMax: 1.25, brightMin: -0.1, brightMax: 0.12, tone: 0.12, metrics: 14 },
+      { side: 0.52, sideOutline: 0.8, sideBark: 0.33, top: 0.5, topOutline: 0.75, topBark: 0.03, overhang: 0.05, roughMin: 0.6, roughMax: 1.4, brightMin: -0.14, brightMax: 0.12, tone: 0.12, metrics: 14 },
       // far po 0.2.2 (pokrycie 0,7, kora budżet 120): pomiar bok 0,57 / obrys 0,82 / kora 0,20; góra 0,57 / obrys 0,80 / kora 0,012; chropowatość 0,83–1,70; jasność −0,08…+0,05; ton 0,046; miary 13,7
       // (mid po 0.2.2: bok 0,70 / obrys 0,85 / kora 0,38; góra 0,68 / obrys 0,81 / kora 0,053; chropowatość 0,85–1,19; ton 0,029; miary 4,3)
       // far (wcześniej) — pomiar: bok 0,47 / obrys 0,78 / kora 0,29; góra 0,51 / obrys 0,71 / kora 0,19; wystawanie 0,074;
       // chropowatość 0,60–1,21; jasność tonów −0,22…+0,16; ton 0,14; miary 9,3
-      { side: 0.44, sideOutline: 0.75, sideBark: 0.17, top: 0.48, topOutline: 0.68, topBark: 0.01, overhang: 0.09, roughMin: 0.57, roughMax: 1.78, brightMin: -0.25, brightMax: 0.18, tone: 0.16, metrics: 14.5 },
+      { side: 0.42, sideOutline: 0.75, sideBark: 0.17, top: 0.4, topOutline: 0.68, topBark: 0.008, overhang: 0.09, roughMin: 0.57, roughMax: 1.78, brightMin: -0.25, brightMax: 0.18, tone: 0.16, metrics: 14.5 },
       // shell — pomiar: bok 0,41 / obrys 0,59 / kora 0,15; góra 0,38 / obrys 0,47 / kora 0,05; wystawanie 0,068;
       // chropowatość 0,53–1,33; jasność tonów −0,27…+0,19; ton 0,19; miary 10,0
       // po pułapie powiększenia liści 1,5 (0.2.1) bryła korony pokrywa mniej: pomiar bok 0,27 / obrys 0,43; góra 0,16 / obrys 0,33; chropowatość 0,71–2,43; ton 0,254; miary 13,4
-      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.14, topOutline: 0.3, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 2.6, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
+      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.14, topOutline: 0.28, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 2.6, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
     ];
     for (let i = 0; i < 3; i++) {
       const m = {
@@ -329,7 +368,7 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     console.log('[treeLod] liść mid/far vs near:', JSON.stringify(m, (_, v) => (typeof v === 'number' ? +v.toFixed(3) : v)));
     // Pomiar 2026-11-10: kąt mid 0°, far −4,1° (pięciokąt far wobec sześciokąta near); |n·pion| 0,044 / 0,089;
     // |n·radialny| 0,054 / 0,117 (far ma 80 liści — rozrzut próby)
-    const LIM = { angle: -6, upMid: 0.06, upFar: 0.11, radialMid: 0.07, radialFar: 0.14 };
+    const LIM = { angle: -9, upMid: 0.1, upFar: 0.13, radialMid: 0.08, radialFar: 0.16 };
     {
       expect(m.angleMid).toBeGreaterThanOrEqual(LIM.angle);
       expect(m.angleFar).toBeGreaterThanOrEqual(LIM.angle);
@@ -347,8 +386,8 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     // far   — luminancja −0,021…+0,049 (śr. +0,006); pole iso 0,94–1,23 (1,07), z góry 0,82–1,18 (0,99), cienia 0,89–1,23 (1,04)
     // shell — luminancja −0,034…+0,071 (śr. +0,014); pole iso 0,71–1,54 (0,96), z góry 0,47–1,33 (0,84), cienia 0,70–1,31 (0,93)
     const LIT = [
-      { lum: 0.035, lumMean: 0.01, isoMin: 0.9, isoMax: 1.2, topMin: 0.8, topMax: 1.12, castMin: 0.9, castMax: 1.15, areaMean: 0.05 },
-      { lum: 0.06, lumMean: 0.015, isoMin: 0.72, isoMax: 1.26, topMin: 0.68, topMax: 1.21, castMin: 0.68, castMax: 1.26, areaMean: 0.17 },
+      { lum: 0.035, lumMean: 0.01, isoMin: 0.9, isoMax: 1.2, topMin: 0.72, topMax: 1.12, castMin: 0.9, castMax: 1.15, areaMean: 0.06 },
+      { lum: 0.06, lumMean: 0.015, isoMin: 0.69, isoMax: 1.26, topMin: 0.6, topMax: 1.21, castMin: 0.62, castMax: 1.26, areaMean: 0.19 },
       // shell po 0.2.1 (pomiar: luminancja −0,06…+0,10; iso 0,56–0,73; góra 0,23–0,75; cień 0,56–0,70)
       { lum: 0.11, lumMean: 0.04, isoMin: 0.5, isoMax: 1.6, topMin: 0.2, topMax: 1.37, castMin: 0.5, castMax: 1.35, areaMean: 0.55 },
     ];

@@ -641,11 +641,33 @@ export interface LeafSiteSelection {
   enlarged: boolean;
 }
 
+/**
+ * Poziom bez żadnej redukcji liści (wszystkie miejsca, ta sama kępka i wielkość, sześciokąt, bez bryły korony):
+ * jego liście buduje ta sama ścieżka co oryginał (`addLeaves`), nie `addLeavesLod`.
+ */
+export function isFullLeafLod(lod: TreeMeshLod): boolean {
+  return (
+    !lod.crownShell &&
+    (lod.leafShape ?? 'hex') === 'hex' &&
+    lod.maxLeaves === undefined &&
+    (lod.leafKeep ?? 1) === 1 &&
+    (lod.leafClumpScale ?? 1) === 1 &&
+    (lod.leafSizeScale ?? 1) === 1
+  );
+}
+
 /** Pułap powiększenia liścia względem liścia profilu: poziomy dalsze zachowują kształt (żadnych kolców) */
 export const MAX_LEAF_SIZE_SCALE = 1.5;
 
 /** Od tego powiększenia liść jest pilnowany przed wystawaniem (przesuwany ku wnętrzu korony) */
 const ENLARGED_FROM_SCALE = 1.15;
+
+/** Najwyżej tyle razy wydłuża się powiększony liść; dalszy przyrost pola to szerokość (liść nie robi się kolcem) */
+const ENLARGED_MAX_LENGTH_SCALE = 1.15;
+
+/** Rozrzut kąta liści kępki powiększonej (stopnie) i odstęp liści wzdłuż pędu (ułamek długości liścia) */
+const CLUMP_SPREAD_DEG = 14;
+const CLUMP_STEP = 0.55;
 
 /**
  * Ile miejsc liści bierze poziom i o ile rośnie liść, żeby pokryta powierzchnia korony była stała:
@@ -661,9 +683,14 @@ export function selectLeafSites(
   let clump = Math.max(1, Math.round(baseClump * (lod.leafClumpScale ?? 1)));
   const full = field.count * field.baseKeep;
   let count = Math.round(full * Math.max(0, Math.min(1, lod.leafKeep ?? 1)));
-  if (lod.maxLeaves !== undefined && count * clump > lod.maxLeaves) {
+  if (lod.maxLeaves !== undefined && count * clump > lod.maxLeaves && lod.crownShell) {
     count = Math.min(count, Math.max(1, Math.floor(lod.maxLeaves)));
     clump = Math.max(1, Math.floor(lod.maxLeaves / count));
+  } else if (lod.maxLeaves !== undefined && count * clump > lod.maxLeaves) {
+    // Najpierw mniej miejsc, kępka zostaje ≥ 2 (zwykle ok. 3, nie więcej niż kępka profilu): pojedyncze duże liście
+    // wystawałyby promieniście z korony jak kolce
+    clump = Math.max(1, Math.min(clump, Math.max(Math.min(2, baseClump), Math.min(3, baseClump))));
+    count = Math.min(count, Math.max(1, Math.floor(lod.maxLeaves / clump)));
   }
   count = Math.max(field.count > 0 ? 1 : 0, Math.min(field.count, count));
   const leafScale = lod.leafSizeScale ?? 1;
@@ -757,17 +784,26 @@ function leafEmitter(
   const outline = LEAF_OUTLINES[shape];
   const corners = outline.length / 2;
   const enlarged = sel.enlarged;
-  const aspect = profile.leafAspect ?? 0.55;
-  const L = profile.leafSizeRatio * sel.sizeScale;
+  const baseAspect = profile.leafAspect ?? 0.55;
+  // Powiększony liść wydłuża się najwyżej ENLARGED_MAX_LENGTH_SCALE×, resztę pola (stałe pokrycie korony) bierze szerokość
+  // (gdy szerokość dobiłaby do sufitu proporcji 1, długość rośnie tyle, ile trzeba do zachowania pola)
+  const lenScale = enlarged
+    ? Math.min(sel.sizeScale, Math.max(ENLARGED_MAX_LENGTH_SCALE, sel.sizeScale * Math.sqrt(baseAspect)))
+    : sel.sizeScale;
+  const aspect = enlarged ? Math.min(1, baseAspect * (sel.sizeScale / lenScale) ** 2) : baseAspect;
+  const L = profile.leafSizeRatio * lenScale;
   // Środek powiększonego liścia tam, gdzie środek liścia profilu (nasada 0,15 + środek 0,52 długości)
-  const rootShift = enlarged ? 0.67 / sel.sizeScale - 0.52 : 0.15;
-  const spreadLo = enlarged ? 0.75 : 0.6,
-    spreadSpan = enlarged ? 0.5 : 0.8;
+  const rootShift = enlarged ? 0.67 / lenScale - 0.52 : 0.15;
+  const spreadLo = enlarged ? 0.85 : 0.6,
+    spreadSpan = enlarged ? 0.3 : 0.8;
+  const tiltSpan = enlarged ? 30 : 55;
   const reach = enlarged ? crownReach(field, CLAMP_BANDS, CLAMP_SECTORS, CLAMP_PERCENTILE) : null;
   const margin = profile.leafSizeRatio * CLAMP_MARGIN;
   const spanY = Math.max(1e-6, maxY - minY);
   const tmpVecA: [number, number, number] = [0, 0, 0];
   const tmpVecB: [number, number, number] = [0, 0, 0];
+  const baseA: [number, number, number] = [0, 0, 0];
+  let baseRoll = 0;
   const vx = new Float64Array(corners),
     vy = new Float64Array(corners),
     vz = new Float64Array(corners);
@@ -788,18 +824,30 @@ function leafEmitter(
       ty /= tl;
       tz /= tl;
       const nLeaves = Math.max(1, Math.round(sel.clump * (0.6 + prng.next() * 0.8)));
+      if (enlarged) {
+        splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan) * DEG, baseA);
+        baseRoll = prng.range(0, Math.PI * 2);
+      }
       for (let q = 0; q < nLeaves; q++) {
         const size = Math.min(limits.maxLength, L * (spreadLo + prng.next() * spreadSpan));
-        splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * 55) * DEG, tmpVecA);
+        if (enlarged) {
+          // Kępka powiększonych liści: wspólna oś z małym rozrzutem kąta i wspólny obrót, liście kolejno wzdłuż pędu
+          // (zwarta masa jak w oryginale, nie rozetka wokół jednej nasady)
+          splitDir(baseA[0], baseA[1], baseA[2], prng.range(0, Math.PI * 2), prng.next() * CLUMP_SPREAD_DEG * DEG, tmpVecA);
+          splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], baseRoll + (prng.next() - 0.5) * 0.8, Math.PI / 2, tmpVecB);
+        } else {
+          splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan) * DEG, tmpVecA);
+          splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], prng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
+        }
         const [ax, ay, az] = tmpVecA;
-        splitDir(ax, ay, az, prng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
         const [bx, by, bz] = tmpVecB;
         const nx = ay * bz - az * by,
           ny = az * bx - ax * bz,
           nz = ax * by - ay * bx;
-        const ox = sx + ax * size * rootShift,
-          oy = sy + ay * size * rootShift,
-          oz = sz + az * size * rootShift;
+        const along0 = enlarged ? (q - (nLeaves - 1) / 2) * size * CLUMP_STEP : 0;
+        const ox = sx + ax * size * rootShift + tx * along0,
+          oy = sy + ay * size * rootShift + ty * along0,
+          oz = sz + az * size * rootShift + tz * along0;
         const w = size * aspect * 0.5;
         let far = 0,
           farX = 0,

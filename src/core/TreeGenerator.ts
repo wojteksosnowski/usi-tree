@@ -6,6 +6,7 @@ import {
   extrudeStem,
   addLeaves,
   addLeavesLod,
+  isFullLeafLod,
   addCrownShell,
   collectLeafSites,
   selectStemRings,
@@ -236,6 +237,23 @@ export class TreeGenerator {
   }
 
   /**
+   * Liczba losowań strumienia kory w ścieżce bez LOD (`detail: 'LOW'`, krok pierścieni 2): po tylu losowaniach
+   * zaczyna się strumień liści oryginału. Pozwala poziomowi bliskiemu mieć dokładnie te same liście bez budowania kory dwa razy.
+   */
+  private static originalBarkDraws(stems: readonly Stem[], profile: SpeciesProfile, radialSegs: number): number {
+    const maxLevel = Math.max(1, profile.levels.length - 1);
+    let draws = 0;
+    for (const s of stems) {
+      if (s.level > maxLevel) continue;
+      const jitter = s.level === 0 ? profile.jitterStrength : profile.jitterStrength * 0.5;
+      if (!(jitter > 0)) continue;
+      const sides = s.level === 0 ? radialSegs : Math.max(3, radialSegs - 1);
+      draws += (Math.ceil((s.px.length - 1) / 2) + 1) * sides;
+    }
+    return draws;
+  }
+
+  /**
    * Siatka poziomu LOD. Kora: pędy poniżej progu promienia i ponad pułap liczby albo budżet trójkątów odpadają, pierścienie wybiera
    * tolerancja cięciwy, cienkie pędy to pręt trójkątny bez denka (kora jest jednostronna — wstęga znikałaby od tyłu).
    * Listowie: miejsca liści z własnego strumienia losowego, wspólne dla poziomów (`collectLeafSites`).
@@ -330,6 +348,11 @@ export class TreeGenerator {
           lod.crownShell,
           lod
         );
+      } else if (isFullLeafLod(lod)) {
+        // Poziom bliski = liście oryginału: ta sama ścieżka `addLeaves` (własny strumień losowy z ziarna drzewa)
+        const leafPrng = new FastPrng(skeleton.seed ^ 0x9e3779b9);
+        leafPrng.skip(TreeGenerator.originalBarkDraws(stems, profile, radialSegs));
+        addLeaves(stems, scale, profile, leafPrng, builder, builder.indices.length, skeleton.leafSites);
       } else {
         addLeavesLod(field, scale, profile, skeleton.seed, builder, builder.indices.length, lod);
       }
