@@ -1,6 +1,6 @@
 {
   "name": "usi-tree",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "Open standard for dendrological tree description (UsiTreeSpec v1), zero-dependency 3D procedural skeleton & mesh generator, and inverse procedural modeling toolkit (TreeFit).",
   "license": "MIT",
   "type": "module",

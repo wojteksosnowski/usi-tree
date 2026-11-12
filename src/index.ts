@@ -23,6 +23,20 @@ export {
 } from './core/TreeGenerator.js';
 
 export {
+  TREE_LOD_PRESETS,
+  countMeshTriangles,
+  pickTreeLodForScale,
+  TREE_LOD_MIN_PIXELS_PER_UNIT_MAX,
+  type TreeLodName,
+} from './core/treeLod.js';
+
+export type {
+  TreeMeshLod,
+  TreeMeshTriangles,
+  TreeLodRawResult,
+} from './core/types.js';
+
+export {
   growEzTree,
   applyPipeRadii,
   type EzTreeOptions,

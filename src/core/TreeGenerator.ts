@@ -5,6 +5,10 @@ import { growBotanicalTree } from './growthEngine.js';
 import {
   extrudeStem,
   addLeaves,
+  addLeavesLod,
+  addCrownShell,
+  collectLeafSites,
+  selectStemRings,
   strokeStem as strokeStemImpl,
   trunkBaseRadius as trunkBaseRadiusImpl,
   DEFAULT_LEAF_DENSITY,
@@ -15,7 +19,10 @@ import {
   ILLUSTRATION_STROKE,
   ezMeshProfile,
 } from './speciesProfiles.js';
+import { countMeshTriangles } from './treeLod.js';
 import type {
+  TreeMeshLod,
+  TreeLodRawResult,
   TreeSpecies,
   TreeDetail,
   TrunkForm,
@@ -170,9 +177,10 @@ export class TreeGenerator {
     skeleton: TreeSkeleton,
     params: Pick<
       TreeGenerationParams,
-      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke'
+      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod'
     >
   ): TreeRawGeometryResult {
+    if (params.lod) return TreeGenerator.meshSkeletonLod(skeleton, params, params.lod);
     const { profile, stems, scale, height } = skeleton;
     const prng = new FastPrng(skeleton.seed ^ 0x9e3779b9);
     const radialSegs = Math.max(
@@ -225,6 +233,136 @@ export class TreeGenerator {
         ),
       },
     };
+  }
+
+  /**
+   * Siatka poziomu LOD. Kora: pędy poniżej progu promienia i ponad pułap liczby albo budżet trójkątów odpadają, pierścienie wybiera
+   * tolerancja cięciwy, cienkie pędy to pręt trójkątny bez denka (kora jest jednostronna — wstęga znikałaby od tyłu).
+   * Listowie: miejsca liści z własnego strumienia losowego, wspólne dla poziomów (`collectLeafSites`).
+   */
+  private static meshSkeletonLod(
+    skeleton: TreeSkeleton,
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke'>,
+    lod: TreeMeshLod
+  ): TreeRawGeometryResult {
+    const { profile, stems, scale, height } = skeleton;
+    const prng = new FastPrng(skeleton.seed ^ 0x9e3779b9);
+    const clampSides = (n: number) => Math.max(3, Math.min(8, Math.round(n)));
+    const radialSegs = clampSides(params.radialSegments ?? profile.radialSegments ?? 4);
+    const trunkSides = clampSides(lod.trunkSides ?? radialSegs);
+    const rod = lod.branchSides !== undefined && lod.branchSides < 3;
+    const branchSides = clampSides(lod.branchSides ?? Math.max(3, radialSegs - 1));
+    const maxLevel = Math.max(1, profile.levels.length - Math.max(0, lod.dropDeepestLevels ?? 0));
+    // Progi w ułamku wysokości drzewa → jednostki szkieletu
+    const unit = height / scale;
+    const minRadius = (lod.minStemRadiusRatio ?? 0) * unit;
+    const tolerance = (lod.ringTolerance ?? 0) * unit;
+
+    const stroke = params.stroke;
+    const trunkR = stroke ? TreeGenerator.trunkBaseRadius(stems) : Infinity;
+    const drawn: Stem[] = [];
+    for (const s of stems) {
+      if (s.level > maxLevel) continue;
+      const finalStem =
+        stroke && !skeleton.uniformStroke ? TreeGenerator.strokeStem(s, stroke, height, trunkR) : s;
+      if (s.level > 0 && finalStem.r[0] < minRadius) continue;
+      drawn.push(finalStem);
+    }
+    const ringsOf = new Map<Stem, number[]>();
+    const sidesOf = (s: Stem) => (s.level === 0 ? trunkSides : branchSides);
+    // Pręt: konar (rząd 1) zostaje otwartą tubą o pełnej grubości końca, cieńsze pędy zbiegają się w szpic
+    const tipOf = (s: Stem) => (s.level === 0 || !rod ? 'cone' : s.level === 1 ? 'open' : 'spike');
+    // Trójkąty tuby: dwa na bok między pierścieniami plus zamknięcie czubka
+    const cost = (s: Stem) => {
+      const rings = selectStemRings(s, tolerance);
+      ringsOf.set(s, rings);
+      const tip = tipOf(s);
+      const bands = rings.length - (tip === 'spike' ? 2 : 1);
+      return 2 * sidesOf(s) * bands + (tip === 'open' ? 0 : sidesOf(s));
+    };
+    let kept: Set<Stem> | null = null;
+    if (lod.maxBranches !== undefined || lod.maxBarkTriangles !== undefined) {
+      const maxBranches = Math.max(0, Math.floor(lod.maxBranches ?? Infinity));
+      let budget = lod.maxBarkTriangles ?? Infinity;
+      for (const s of drawn) if (s.level === 0) budget -= cost(s);
+      const branches = drawn
+        .map((s, i) => ({ s, i, weight: s.length * s.r[0] }))
+        .filter((b) => b.s.level > 0)
+        .sort((a, b) => a.s.level - b.s.level || b.weight - a.weight || a.i - b.i);
+      kept = new Set();
+      for (const b of branches) {
+        if (kept.size >= maxBranches) break;
+        budget -= cost(b.s);
+        if (budget < 0) break;
+        kept.add(b.s);
+      }
+    }
+
+    const builder = new MeshBufferBuilder();
+    for (const s of drawn) {
+      const trunk = s.level === 0;
+      if (!trunk && kept && !kept.has(s)) continue;
+      const jitter = trunk ? profile.jitterStrength : profile.jitterStrength * 0.5;
+      extrudeStem(
+        s,
+        scale,
+        sidesOf(s),
+        jitter,
+        1,
+        prng,
+        builder,
+        ringsOf.get(s) ?? selectStemRings(s, tolerance),
+        tipOf(s)
+      );
+    }
+    builder.addGroup(0, builder.indices.length, 0);
+
+    if (params.withFoliageAccents ?? false) {
+      const field = collectLeafSites(stems, profile, skeleton.seed, skeleton.leafSites);
+      if (lod.crownShell) {
+        addCrownShell(
+          field,
+          scale,
+          profile,
+          skeleton.seed,
+          builder,
+          builder.indices.length,
+          lod.crownShell,
+          lod
+        );
+      } else {
+        addLeavesLod(field, scale, profile, skeleton.seed, builder, builder.indices.length, lod);
+      }
+    }
+
+    const raw = builder.buildRawMesh();
+    return {
+      mesh: raw,
+      bounds: {
+        height: raw.boundingBox.max[1] - raw.boundingBox.min[1],
+        crownRadius: Math.max(
+          Math.abs(raw.boundingBox.min[0]),
+          Math.abs(raw.boundingBox.max[0]),
+          Math.abs(raw.boundingBox.min[2]),
+          Math.abs(raw.boundingBox.max[2])
+        ),
+      },
+    };
+  }
+
+  /**
+   * Jeden szkielet w kilku poziomach LOD (np. `TREE_LOD_PRESETS`): siatki w kolejności `lods`
+   * z liczbą trójkątów kory i listowia. Sylwetka i miejsca liści są wspólne dla wszystkich poziomów.
+   */
+  static meshSkeletonLodsRaw(
+    skeleton: TreeSkeleton,
+    lods: readonly TreeMeshLod[],
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke'> = {}
+  ): TreeLodRawResult[] {
+    return lods.map((lod) => {
+      const res = TreeGenerator.meshSkeletonRaw(skeleton, { ...params, lod });
+      return { ...res, triangles: countMeshTriangles(res.mesh) };
+    });
   }
 
   /** Promień nasady pnia (pierwszy pęd rzędu 0) — odniesienie limitów grubości kreski; brak pnia = bez limitu */

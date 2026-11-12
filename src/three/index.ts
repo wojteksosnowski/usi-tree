@@ -7,6 +7,7 @@ import {
   type Stem,
   type TreeStroke,
 } from '../core/TreeGenerator.js';
+import type { TreeMeshLod, TreeMeshTriangles } from '../core/types.js';
 
 export * from '../index.js';
 
@@ -16,6 +17,10 @@ export interface TreeGeometryResult {
     height: number;
     crownRadius: number;
   };
+}
+
+export interface TreeLodGeometryResult extends TreeGeometryResult {
+  triangles: TreeMeshTriangles;
 }
 
 /**
@@ -63,13 +68,26 @@ export class TreeGenerator extends CoreTreeGenerator {
 
   static meshSkeleton(
     skeleton: TreeSkeleton,
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke'>
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod'>
   ): TreeGeometryResult {
     const rawRes = CoreTreeGenerator.meshSkeletonRaw(skeleton, params);
     return {
       geometry: toThreeBufferGeometry(rawRes.mesh),
       bounds: rawRes.bounds,
     };
+  }
+
+  /** Jeden szkielet w kilku poziomach LOD (np. `TREE_LOD_PRESETS`): geometrie w kolejności `lods` z liczbą trójkątów */
+  static meshSkeletonLods(
+    skeleton: TreeSkeleton,
+    lods: readonly TreeMeshLod[],
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke'> = {}
+  ): TreeLodGeometryResult[] {
+    return CoreTreeGenerator.meshSkeletonLodsRaw(skeleton, lods, params).map((res) => ({
+      geometry: toThreeBufferGeometry(res.mesh),
+      bounds: res.bounds,
+      triangles: res.triangles,
+    }));
   }
 
   static override buildSkeleton(params: TreeGenerationParams): TreeSkeleton {

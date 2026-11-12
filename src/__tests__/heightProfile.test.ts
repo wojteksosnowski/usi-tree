@@ -7,8 +7,8 @@ import { treeKindParams } from '../core/treeSpeciesRegistry.js';
 const entries = (FITTED as unknown as { ref: string; startSpecies: TreeSpecies; heightAnchors?: HeightAnchor[] }[]).filter((f) => f.heightAnchors);
 
 describe('profil zależny od wysokości', () => {
-  it('klon, brzoza, lipa, wiąz i jesion mają węzły wysokości', () => {
-    expect(entries.map((e) => e.ref).sort()).toEqual(['ASH', 'BIRCH', 'Elm', 'Linden', 'Sycamore']);
+  it('klon, brzoza, lipa, wiąz, jesion, platan i topola czarna mają węzły wysokości', () => {
+    expect(entries.map((e) => e.ref).sort()).toEqual(['ASH', 'BIRCH', 'Black Poplar', 'Elm', 'Linden', 'Plane', 'Sycamore']);
   });
 
   it('węzły jednego rodzaju mają ten sam zestaw pól (pole w części węzłów przeskakuje skokowo w połowie odstępu)', () => {
@@ -49,5 +49,18 @@ describe('profil zależny od wysokości', () => {
 
   it('klasy wysokości co pół oktawy w zakresie 6–24 m', () => {
     expect([2, 6, 8, 10, 12, 15, 17, 20, 24, 40].map(heightClassM)).toEqual([6, 6, 8.5, 8.5, 12, 17, 17, 17, 24, 24]);
+  });
+
+  it('topola czarna: dwa węzły wysokości, rozwidlenie pnia na 1/3–1/2 wysokości z pnącymi liderami', () => {
+    const bp = entries.find((e) => e.ref === 'Black Poplar')!;
+    expect(bp.heightAnchors!.map((a) => a.h)).toEqual([9, 24]);
+    for (const h of [6, 9, 15, 24]) {
+      const { species, profile, form } = treeKindParams('Black Poplar' as never, h);
+      expect(profile!.trunkForkHeightRatio!, `h=${h}`).toBeGreaterThanOrEqual(1 / 3);
+      expect(profile!.trunkForkHeightRatio!, `h=${h}`).toBeLessThanOrEqual(1 / 2);
+      expect(profile!.trunkForkAngle!).toBeLessThanOrEqual(45); // liderzy pną się, nie rozchodzą poziomo
+      const sk = TreeGenerator.buildSkeleton({ species, height: h, seed: 42, form, profile });
+      expect(sk.stems[0].length).toBeCloseTo(profile!.trunkForkHeightRatio!, 1);
+    }
   });
 });

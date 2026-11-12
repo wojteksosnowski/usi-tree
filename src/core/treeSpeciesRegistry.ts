@@ -6,6 +6,7 @@
  * Bez three: moduł wolno importować poza leniwym widokiem 3D (strażnik `lazy3d.guard.test.ts`).
  */
 import type { SpeciesProfile, TreeSpecies, TrunkForm } from './types.js';
+import { SPECIES_PROFILES } from './speciesProfiles.js';
 import FITTED_PROFILES from './fittedProfiles.json' with { type: 'json' };
 import { profileAtHeight, type HeightAnchor } from './heightProfile.js';
 
@@ -57,6 +58,15 @@ export function hasHeightScaling(kind: TreeKind): boolean {
   return !!FITTED.get(kind)?.heightAnchors?.length;
 }
 
+const warnedUnknownKinds = new Set<string>();
+
+/** Nieznany rodzaj spada na dąb (zachowanie wsteczne), ale głośno: jedno ostrzeżenie na identyfikator */
+function warnUnknownKind(kind: string): void {
+  if (warnedUnknownKinds.has(kind)) return;
+  warnedUnknownKinds.add(kind);
+  console.warn(`[usi-tree] nieznany rodzaj drzewa "${kind}": użyto gatunku bazowego OAK`);
+}
+
 /**
  * Parametry generatora dla rodzaju; brak dopasowanego profilu → gatunek bazowy.
  * Rodzaj z węzłami wysokości dostaje profil dla `height` (bez wysokości: profil 9 m).
@@ -67,7 +77,9 @@ export function treeKindParams(kind: TreeKind, height?: number): TreeKindParams 
     const profile = fitted.heightAnchors?.length ? profileAtHeight(fitted.heightAnchors, height ?? 9) : fitted.profile;
     return { species: fitted.startSpecies, profile, form: fitted.form ?? 'SINGLE' };
   }
-  return { species: kind as TreeSpecies, form: 'SINGLE' };
+  if (!(kind in SPECIES_PROFILES)) warnUnknownKind(kind);
+  const baseSpecies = (kind in SPECIES_PROFILES ? kind : 'OAK') as TreeSpecies;
+  return { species: baseSpecies, profile: SPECIES_PROFILES[baseSpecies], form: 'SINGLE' };
 }
 
 /**

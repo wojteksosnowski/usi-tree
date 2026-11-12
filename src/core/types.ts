@@ -57,6 +57,71 @@ export interface TreeGenerationParams {
   profile?: SpeciesProfile;     // Własny profil zamiast SPECIES_PROFILES[species] (dopasowanie do wzorców)
   ez?: EzTreeOptions;           // Wzrost pnia, gałęzi i miejsc liści wg ez-tree (`ezTree.ts`); profil służy wtedy tylko siatce (kreska, liście)
   stroke?: TreeStroke;          // Kreska siatki (tylko grubość tub; szkielet bez zmian), domyślnie jak w szkielecie
+  lod?: TreeMeshLod;            // Degradacja geometryczna siatki z zachowaniem wyglądu (zastępuje `detail`); brak = dotychczasowe zachowanie
+}
+
+/**
+ * Opis poziomu geometrycznego siatki (LOD). Dotyczy wyłącznie siatki — szkielet jest wspólny dla wszystkich poziomów,
+ * więc sylwetka korony się nie zmienia. Miejsca liści są wybierane deterministycznie i zagnieżdżone (far ⊂ mid ⊂ near).
+ */
+export interface TreeMeshLod {
+  /** Pędy rzędu ≥ 1 o promieniu nasady poniżej tego ułamka wysokości drzewa są pomijane */
+  minStemRadiusRatio?: number;
+  /** Odchyłka cięciwy przy decymacji pierścieni tuby (ułamek wysokości drzewa; oś i promień); brak = wszystkie pierścienie */
+  ringTolerance?: number;
+  /** Liczba boków pnia (3–8) */
+  trunkSides?: number;
+  /** Liczba boków gałęzi; 2 = pręt trójkątny: konar bez denka, cieńszy pęd zakończony szpicem (kora jest jednostronna, więc wstęga 2-boczna byłaby niewidoczna od tyłu) */
+  branchSides?: number;
+  /** Skala ekranu (px na jednostkę), przy której i poniżej której poziom jest nieodróżnialny od `near` (brak = zawsze ważny) */
+  minPixelsPerUnit?: number;
+  /** Ile najgłębszych rzędów pędów pominąć (jak `detail: 'LOW'` = 1) */
+  dropDeepestLevels?: number;
+  /**
+   * Obrys liścia o tym samym polu: sześciokąt (4 tr., obrys liścia poziomu bliskiego), pięciokąt (3 tr., ścięty koniec),
+   * latawiec (2 tr.), trójkąt (1 tr.; czyta się jak kolec — poza presetami). Liść poziomu dalszego to ten sam obrys, większy.
+   */
+  leafShape?: 'hex' | 'penta' | 'quad' | 'tri';
+  /** Ułamek miejsc liści (0–1); pole liścia rośnie odwrotnie do liczby liści, więc pokryta powierzchnia jest stała */
+  leafKeep?: number;
+  /**
+   * Ułamek (0–1) pokrycia liśćmi poziomu bliskiego, jaki poziom wolno utracić po osiągnięciu pułapu powiększenia liścia
+   * (`MAX_LEAF_SIZE_SCALE`): zamiast powiększać liść ponad pułap poziom pokrywa mniej. Brak = 1 (pełne pokrycie).
+   */
+  leafCoverage?: number;
+  /** Mnożnik liczby liści w kępce (profil: `leafClump`) */
+  leafClumpScale?: number;
+  /** Dodatkowy mnożnik długości liścia (po kompensacji pola) — masa barwna korony względem profilu */
+  leafSizeScale?: number;
+  /** Pułap liczby liści drzewa: ogranicza `leafKeep` u rodzajów o gęstej koronie (kompensacja pola jak przy `leafKeep`) */
+  maxLeaves?: number;
+  /**
+   * Pułap liczby pędów rzędu ≥ 1: zostają najpierw wszystkie konary, potem gałęzie — w każdym rzędzie od największego
+   * pola rzutu (długość × promień nasady). Wybór zagnieżdżony: mniejszy pułap daje podzbiór większego.
+   */
+  maxBranches?: number;
+  /**
+   * Budżet trójkątów kory: pnie zawsze, potem pędy w tej samej kolejności co przy `maxBranches`, dopóki mieszczą się
+   * w budżecie — rodzaj o prostych pędach dostaje ich więcej niż rodzaj o pędach krętych (więcej pierścieni).
+   */
+  maxBarkTriangles?: number;
+  /**
+   * Zamiast liści bryła korony z miejsc liści: zamknięty rdzeń (pierścienie × boki) w trzech tonach wg kubełków `shade`
+   * oraz `lobes` dużych liści na nim (obrys `leafShape`, orientacja jak liście poziomu bliskiego), które łamią obrys
+   */
+  crownShell?: { rings: number; sides: number; lobes?: number };
+}
+
+/** Liczba trójkątów siatki drzewa: kora (materiał 0) i listowie (materiały 1..3) */
+export interface TreeMeshTriangles {
+  bark: number;
+  foliage: number;
+  total: number;
+}
+
+/** Siatka jednego poziomu LOD z liczbą trójkątów */
+export interface TreeLodRawResult extends TreeRawGeometryResult {
+  triangles: TreeMeshTriangles;
 }
 
 /**
