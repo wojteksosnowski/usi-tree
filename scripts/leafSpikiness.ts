@@ -10,6 +10,7 @@ import { TreeGenerator, ILLUSTRATION_STROKE, DEFAULT_LEAF_DENSITY } from '../src
 import { treeKindParams, type TreeKind } from '../src/core/treeSpeciesRegistry.js';
 import { TREE_LOD_PRESETS, type TreeLodName } from '../src/core/treeLod.js';
 import { leafSpikiness } from '../src/fitter/lodFidelity.js';
+import { drawMeshSide } from './lib/meshRaster.js';
 import type { RawTreeMesh, SpeciesProfile } from '../src/core/types.js';
 
 const outDir = process.argv[2];
@@ -27,7 +28,6 @@ function city(b: SpeciesProfile): SpeciesProfile {
   };
 }
 
-const COLORS = ['#5b4630', '#9ccc5a', '#6fa83f', '#487a2c'];
 function render(meshes: RawTreeMesh[], file: string) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const m of meshes) {
@@ -39,22 +39,8 @@ function render(meshes: RawTreeMesh[], file: string) {
   const g = cv.getContext('2d');
   g.fillStyle = '#fcfbf9'; g.fillRect(0, 0, cv.width, cv.height);
   meshes.forEach((m, mi) => {
-    const tris: { z: number; c: number; p: number[] }[] = [];
-    for (const gr of m.groups) for (let t = gr.start; t < gr.start + gr.count; t += 3) {
-      const a = m.indices[t] * 3, b = m.indices[t + 1] * 3, c = m.indices[t + 2] * 3;
-      const P3 = [a, b, c].map((i) => [m.positions[i], m.positions[i + 1], m.positions[i + 2]]);
-      tris.push({ z: (P3[0][2] + P3[1][2] + P3[2][2]) / 3, c: gr.materialIndex, p: P3.flatMap((q) => [q[0], q[1]]) });
-    }
-    tris.sort((u, v) => u.z - v.z);
     const ox = mi * cell + 20 + (cell - 40 - (maxX - minX) * k) / 2;
-    for (const t of tris) {
-      g.beginPath();
-      for (let i = 0; i < 3; i++) {
-        const x = ox + (t.p[i * 2] - minX) * k, y = cell - 20 - (t.p[i * 2 + 1] - minY) * k;
-        if (i) g.lineTo(x, y); else g.moveTo(x, y);
-      }
-      g.closePath(); g.fillStyle = COLORS[t.c]; g.fill(); g.strokeStyle = '#2c3a20'; g.lineWidth = 0.5; g.stroke();
-    }
+    drawMeshSide(g, m, ox - minX * k, cell - 20 + minY * k, k);
   });
   fs.writeFileSync(file, cv.toBuffer('image/png'));
 }
