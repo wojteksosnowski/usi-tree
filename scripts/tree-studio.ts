@@ -1163,6 +1163,9 @@ async function main() {
       req.on('end', () => {
         try {
           const { kind, height, profile } = JSON.parse(body);
+          // Bez tego JSON.stringify zapisze węzeł `{}` (h i profile undefined) i zepsuje heightAnchors
+          if (typeof height !== 'number' || !Number.isFinite(height)) throw new Error('Brak poprawnej wysokości węzła (height)');
+          if (!profile || typeof profile !== 'object' || !Array.isArray(profile.levels)) throw new Error('Brak poprawnego profilu (profile.levels)');
           const fitted = JSON.parse(fs.readFileSync(FITTED_PATH, 'utf-8'));
           const entry = fitted.find((f: any) => f.ref === kind);
           if (!entry) throw new Error(`Gatunek "${kind}" nie ma wpisu w fittedProfiles.json`);

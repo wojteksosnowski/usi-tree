@@ -260,7 +260,8 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
       // shell — pomiar: bok 0,41 / obrys 0,59 / kora 0,15; góra 0,38 / obrys 0,47 / kora 0,05; wystawanie 0,068;
       // chropowatość 0,53–1,33; jasność tonów −0,27…+0,19; ton 0,19; miary 10,0
       // po pułapie powiększenia liści 1,5 (0.2.1) bryła korony pokrywa mniej: pomiar bok 0,27 / obrys 0,43; góra 0,16 / obrys 0,33; chropowatość 0,71–2,43; ton 0,254; miary 13,4
-      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.12, topOutline: 0.19, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 2.6, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
+      // po zmianach wzrostu 2026-11-21 (growthEngine/crownEnvelope; preset shell bez zmian): chropowatość maks 2,91
+      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.12, topOutline: 0.19, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 3.0, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
     ];
     for (let i = 0; i < 3; i++) {
       const m = {
@@ -514,11 +515,12 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
   });
 
   it('bez `lod` siatka jest deterministyczna (sumy kontrolne domyślnego schematu B)', () => {
+    // Sumy odświeżone 2026-11-21 po zmianach wzrostu (growthEngine / crownEnvelope, commit feat: wiatr GPU…)
     const cases = [
-      [{ species: 'OAK', height: 10, seed: 42, withFoliageAccents: true, detail: 'HIGH' }, '17342360:90183:[[0,6399,0],[6399,31716,1],[38115,36636,2],[74751,15432,3]]'],
-      [{ species: 'BIRCH', height: 14, seed: 7, withFoliageAccents: true, detail: 'MEDIUM', radialSegments: 5 }, '8fef303d:67863:[[0,6027,0],[6027,18000,1],[24027,29940,2],[53967,13896,3]]'],
-      [{ species: 'SPRUCE', height: 10, seed: 11, withFoliageAccents: true, detail: 'LOW', radialSegments: 3, stroke: ILLUSTRATION_STROKE }, '837e18ab:60042:[[0,1890,0],[1890,5064,1],[6954,29580,2],[36534,23508,3]]'],
-      [{ species: 'WILLOW', height: 8, seed: 3, form: 'FORKED' }, '8a49144b:5430:[[0,5430,0]]'],
+      [{ species: 'OAK', height: 10, seed: 42, withFoliageAccents: true, detail: 'HIGH' }, 'f4533890:82929:[[0,6081,0],[6081,26292,1],[32373,37344,2],[69717,13212,3]]'],
+      [{ species: 'BIRCH', height: 14, seed: 7, withFoliageAccents: true, detail: 'MEDIUM', radialSegments: 5 }, '48fedc36:66267:[[0,5871,0],[5871,15732,1],[21603,30900,2],[52503,13764,3]]'],
+      [{ species: 'SPRUCE', height: 10, seed: 11, withFoliageAccents: true, detail: 'LOW', radialSegments: 3, stroke: ILLUSTRATION_STROKE }, '387d716e:60138:[[0,1890,0],[1890,4776,1],[6666,29304,2],[35970,24168,3]]'],
+      [{ species: 'WILLOW', height: 8, seed: 3, form: 'FORKED' }, '2e607760:5541:[[0,5541,0]]'],
     ] as const;
     for (const [params, sum] of cases) {
       expect(meshChecksum(TreeGenerator.generateRaw(params).mesh), params.species).toBe(sum);

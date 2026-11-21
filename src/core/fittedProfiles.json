@@ -1177,8 +1177,7 @@
           "twigGnarl": 0.15,
           "kinkScale": 0.32
         }
-      },
-      {}
+      }
     ]
   },
   {
@@ -3216,6 +3215,7 @@
           "trunkHeightRatio": 0.33,
           "trunkBaseRadiusRatio": 0.011,
           "trunkLengthRatio": 0.97,
+          "trunkTipRatio": 0.3,
           "trunkCurveV": 3,
           "crownSpreadRatio": 0.286,
           "crownShape": "UMBRELLA",
@@ -3286,6 +3286,7 @@
           "trunkHeightRatio": 0.55,
           "trunkBaseRadiusRatio": 0.011,
           "trunkLengthRatio": 0.97,
+          "trunkTipRatio": 0.3,
           "trunkCurveV": 3,
           "crownSpreadRatio": 0.209,
           "crownShape": "UMBRELLA",
