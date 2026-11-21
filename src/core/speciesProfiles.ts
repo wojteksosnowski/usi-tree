@@ -160,31 +160,3 @@ export const CROWN_SHAPE_PEAK: Record<CrownShape, number> = {
   UMBRELLA: 0.35 / 0.85,
 };
 
-import type { EzTreeOptions } from './types.js';
-
-/**
- * Profil siatki dla szkieletu ez-tree: liczba rzędów (szczegółowość LOW pomija najdrobniejszy), przekrój tub,
- * odziomek i liście w naszej stylizacji. Parametry wzrostu naszego modelu nie są używane.
- */
-export function ezMeshProfile(ez: EzTreeOptions): SpeciesProfile {
-  const evergreen = ez.type === 'evergreen';
-  return {
-    trunkHeightRatio: 0.2,
-    trunkBaseRadiusRatio: 0.012,
-    trunkLengthRatio: 1,
-    trunkCurveV: 0,
-    crownSpreadRatio: 0.4,
-    crownShape: 'SPHERICAL',
-    ratioPower: 1.2,
-    levels: Array.from({ length: ez.branch.levels }, () =>
-      lvl({ count: 0, downAngle: 0, lengthRatio: 1 })
-    ),
-    jitterStrength: 0.06,
-    flareFactor: 1.12,
-    radialSegments: 4,
-    leafSizeRatio: evergreen ? 0.014 : 0.016,
-    leafAspect: evergreen ? 0.18 : 0.55,
-    leafClump: evergreen ? 9 : 4,
-  };
-}
-

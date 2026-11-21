@@ -1,5 +1,4 @@
 import { FastPrng } from './prng.js';
-import { applyPipeRadii, growEzTree } from './ezTree.js';
 import { MeshBufferBuilder } from './meshBuilder.js';
 import { growBotanicalTree } from './growthEngine.js';
 import {
@@ -19,7 +18,6 @@ import {
   SPECIES_PROFILES,
   TIDY_STRUCTURE,
   ILLUSTRATION_STROKE,
-  ezMeshProfile,
 } from './speciesProfiles.js';
 import { countMeshTriangles } from './treeLod.js';
 import type {
@@ -37,7 +35,6 @@ import type {
   SpeciesProfile,
   Stem,
   TreeSkeleton,
-  EzTreeOptions,
 } from './types.js';
 
 export {
@@ -53,17 +50,12 @@ export {
   type SpeciesProfile,
   type Stem,
   type TreeSkeleton,
-  type EzTreeOptions,
   SPECIES_PROFILES,
   TIDY_STRUCTURE,
   ILLUSTRATION_STROKE,
   DEFAULT_LEAF_DENSITY,
-  ezMeshProfile,
   FastPrng,
 };
-
-const EZ_TRUNK_RADIUS = 0.018;
-const EZ_TIP_RADIUS = 0.0011;
 
 /**
  * Proceduralny generator drzew (TreeGenerator) — model rekurencyjny Webera–Penna
@@ -93,7 +85,6 @@ export class TreeGenerator {
       ? { ...rawProfile, leafSizeRatio: (rawProfile.leafSizeCm / 100) / Math.max(0.5, height) }
       : rawProfile;
     const seed = params.seed ?? (Math.floor(height * 100) + species.charCodeAt(0) * 31);
-    if (params.ez) return TreeGenerator.buildEzSkeleton(params, params.ez, seed, height);
 
     const flow = params.flow ?? false;
     const asymAz = ((((seed * 0.6180339887) % 1) + 1) % 1) * Math.PI * 2;
@@ -113,73 +104,6 @@ export class TreeGenerator {
       stems,
       scale: height / Math.max(1e-6, maxY),
       height,
-    };
-  }
-
-  /**
-   * Szkielet ze wzrostu ez-tree, przeliczony do skali nominalnej (wysokość = 1), jak szkielety naszego modelu:
-   * dalej siatkuje go `meshSkeleton` w naszej stylizacji. Profil (jawny albo `ezMeshProfile`) steruje tylko siatką.
-   */
-  private static buildEzSkeleton(
-    params: TreeGenerationParams,
-    ez: EzTreeOptions,
-    seed: number,
-    height: number
-  ): TreeSkeleton {
-    const profile = params.profile ?? ezMeshProfile(ez);
-    const sk = growEzTree(ez, seed, params.form ?? 'SINGLE', params.flow ?? false);
-    const { stems, leafSites } = sk;
-    // Model rur z końcówkami o promieniu 1, potem skala: pnie od gruntu razem = EZ_TRUNK_RADIUS (wzorzec SA_Artboard2)
-    const p = ez.pipeExponent ?? 2.5;
-    applyPipeRadii(sk, p, 1);
-    let rootSum = 0;
-    for (let i = 0; i < stems.length; i++) {
-      if (sk.parents[i] < 0) rootSum += Math.pow(stems[i].r[0], p);
-    }
-    let maxY = 1e-6;
-    for (const s of stems) {
-      for (const y of s.py) {
-        if (y > maxY) maxY = y;
-      }
-    }
-    const k = 1 / maxY;
-    const kr = EZ_TRUNK_RADIUS / Math.pow(Math.max(1e-9, rootSum), 1 / p);
-    for (const s of stems) {
-      for (let i = 0; i < s.px.length; i++) {
-        s.px[i] *= k;
-        s.py[i] *= k;
-        s.pz[i] *= k;
-        s.r[i] = Math.max(EZ_TIP_RADIUS, s.r[i] * kr);
-      }
-      s.length *= k;
-      if (s.level === 0 && s.py[0] < 1e-6) {
-        const flareSpan = Math.max(2, Math.ceil(s.r.length * 0.25));
-        for (let i = 0; i < Math.min(s.r.length, flareSpan); i++) {
-          const u = i / flareSpan;
-          s.r[i] *= 1 + (profile.flareFactor - 1) * (1 - u) * (1 - u);
-        }
-      }
-    }
-    const sites: number[] = [];
-    for (let i = 0; i < leafSites.length; i += 7) {
-      sites.push(
-        leafSites[i] * k,
-        leafSites[i + 1] * k,
-        leafSites[i + 2] * k,
-        leafSites[i + 3],
-        leafSites[i + 4],
-        leafSites[i + 5]
-      );
-    }
-    return {
-      species: params.species,
-      profile,
-      seed,
-      stems,
-      scale: height,
-      height,
-      leafSites: sites,
-      uniformStroke: true,
     };
   }
 

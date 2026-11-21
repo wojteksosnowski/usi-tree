@@ -7,7 +7,6 @@ export {
   TIDY_STRUCTURE,
   ILLUSTRATION_STROKE,
   DEFAULT_LEAF_DENSITY,
-  ezMeshProfile,
   type TreeSpecies,
   type TreeDetail,
   type TrunkForm,
@@ -35,24 +34,6 @@ export type {
   TreeMeshTriangles,
   TreeLodRawResult,
 } from './core/types.js';
-
-export {
-  growEzTree,
-  applyPipeRadii,
-  type EzTreeOptions,
-  type EzSkeleton,
-} from './core/ezTree.js';
-
-export {
-  EZ_TREE_PRESETS,
-  type EzTreePresetName,
-} from './core/ezTreePresets.js';
-
-export {
-  EZ_SPECIES_PRESETS,
-  stabilizeToDesign,
-  type EzSpeciesPreset,
-} from './core/ezTreeSpecies.js';
 
 export {
   profileAtHeight,

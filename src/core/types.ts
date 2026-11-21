@@ -21,30 +21,6 @@ export type TrunkForm =
   | 'FORKED'   // pień rozdwojony nisko w dwa przewodniki o podobnej grubości
   | 'MULTI';   // odmiana wielopniowa: 3–5 pni z jednego odziomka, rozchylonych wachlarzowo
 
-/** Parametry wzrostu szkieletu wg ez-tree */
-export type ByLevel = Record<number, number>;
-
-export interface EzTreeOptions {
-  type: 'deciduous' | 'evergreen';
-  branch: {
-    levels: number;
-    angle: ByLevel;       // kąt dziecka względem rodzica (stopnie), poziomy 1..
-    children: ByLevel;    // liczba dzieci na pędzie danego poziomu
-    force: { direction: { x: number; y: number; z: number }; strength: number };
-    gnarliness: ByLevel;  // falowanie (rad na sekcję, ×max(1, 1/√r))
-    length: ByLevel;
-    radius: ByLevel;      // poziom 0: promień pnia; dalej ułamek promienia rodzica w punkcie odgałęzienia
-    sections: ByLevel;
-    segments: ByLevel;
-    start: ByLevel;       // początek odgałęzień na rodzicu (ułamek długości)
-    taper: ByLevel;
-    twist: ByLevel;
-  };
-  leaves: { angle: number; count: number; start: number; size: number; sizeVariance: number };
-  scaffold?: { count: number; height: number; lean: number; leanV: number };
-  pipeExponent?: number;
-}
-
 export interface TreeGenerationParams {
   species: TreeSpecies;
   height: number;               // Wysokość drzewa w metrach (np. 3.0 - 30.0)
@@ -55,7 +31,6 @@ export interface TreeGenerationParams {
   form?: TrunkForm;             // Pokrój pnia (domyślnie SINGLE)
   flow?: boolean;               // Płynne, cienkie gałązki: bez załamań i ostróg, łagodne wygięcia
   profile?: SpeciesProfile;     // Własny profil zamiast SPECIES_PROFILES[species] (dopasowanie do wzorców)
-  ez?: EzTreeOptions;           // Wzrost pnia, gałęzi i miejsc liści wg ez-tree (`ezTree.ts`); profil służy wtedy tylko siatce (kreska, liście)
   stroke?: TreeStroke;          // Kreska siatki (tylko grubość tub; szkielet bez zmian), domyślnie jak w szkielecie
   lod?: TreeMeshLod;            // Degradacja geometryczna siatki z zachowaniem wyglądu (zastępuje `detail`); brak = dotychczasowe zachowanie
   doubleSidedTwigs?: boolean;   // Wstęgi gałązek L3+: false (domyślnie, schemat B dla DoubleSide) = 1 strona; true (schemat C dla FrontSide) = Front+Back
@@ -284,7 +259,7 @@ export interface TreeSkeleton {
   stems: Stem[];
   scale: number;   // skala nominalna → metry
   height: number;
-  /** Miejsca kępek liści (x, y, z, kierunek dx, dy, dz) ze wzrostu ez-tree; brak = rozmieszczenie na witkach */
+  /** Miejsca kępek liści (x, y, z, kierunek dx, dy, dz) podane z zewnątrz (własny szkielet); brak = rozmieszczenie na witkach */
   leafSites?: number[];
   /** Promienie ciągłe między rzędami (model rur) — kreska bez mnożników rzędów, tylko wygładzenie i odziomek */
   uniformStroke?: boolean;
