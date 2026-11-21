@@ -37,7 +37,8 @@ System generacji drzew w `usi-tree` rozdziela definicję morfologii gatunku od s
 | `trunkBaseRadiusRatio` | `number` | `0.005 – 0.08` | *(wymagane)* | Promień pnia u podstawy jako ułamek wysokości drzewa ($r_0 = H \cdot \text{ratio}$). |
 | `trunkLengthRatio` | `number` | `0.2 – 1.2` | *(wymagane)* | Długość przewodnika względem wysokości drzewa ($< 1$: przewodnik kończy się wewnątrz korony). |
 | `trunkTipRatio` | `number` | `0.02 – 0.8` | `0.3` | Ułamek promienia pnia na szczycie względem podstawy przy liniowym zwężaniu: $r(t) = r_0 (1 - t(1 - \text{tipRatio}))$. |
-| `trunkTaper` | `number` | `0 – 0.99` | `0` (brak = liniowo) | Wykładnicze zwężanie pnia (ubytki całkowite): $r(t) = r_0 (1 - \text{trunkTaper})^t$. Gdy $> 0$, nadpisuje `trunkTipRatio`. |
+| `taperShape` | `number` | `0 – 1` | `0` | Kształt zwężania pnia (i domyślnie gałęzi) do tej samej grubości czubka: $r(t) = r_0\,[(1-s)(1 - t(1-\text{tip})) + s\,\text{tip}^t]$; `0` liniowo, `1` wykładniczo. Nie zmienia grubości czubka. |
+| `trunkTaper` | `number` | — | — | *@deprecated*: przeliczany przez `normalizeTaper` na `trunkTipRatio = 1 − x`, `taperShape = 1`; `0` ignorowane. |
 | `trunkCurveV` | `number` | `0 – 20` (°/seg) | *(wymagane)* | Losowe falowanie przewodnika w stopniach na segment. |
 | `trunkKink` | `number` | `0 – 15` (°) | `3` | Maksymalne załamanie przewodnika w węźle odgałęzienia w stronę przeciwną do dziecka (iglaste zwykle `0`). |
 | `crownSpreadRatio` | `number` | `0.05 – 0.9` | *(wymagane)* | Skala promienia/długości konarów względem wysokości drzewa. |
@@ -79,7 +80,8 @@ System generacji drzew w `usi-tree` rozdziela definicję morfologii gatunku od s
 | `kink` | `number` | `0 – 45` (°) | `15` | Maksymalne załamanie pędu w węźle odgałęzienia w stronę przeciwną do dziecka (mnożone przez `kinkScale`). |
 | `fork` | `number` | `0 – 60` (°) | *(wymagane)* | Kąt rozwidlenia „Y” na końcu pędu (`0` = brak rozwidlenia). |
 | `tipRatio` | `number` | `0.05 – 0.9` | `fork > 0 ? 0.35 : 0.22` | Ułamek promienia na końcu pędu względem nasady (z dolnym ograniczeniem `0.12` po przycięciu `prune`). |
-| `taper` | `number` | `0 – 0.5` | `0` (brak = `tipRatio`) | *@deprecated*: Współczynnik zwężania na sekcję; gdy $> 0$, nadpisuje `tipRatio`. |
+| `taperShape` | `number` | `0 – 1` | `taperShape` gatunku | Kształt zwężania gałęzi tego poziomu (jak wyżej); grubość końca zadaje wyłącznie `tipRatio`. |
+| `taper` | `number` | — | — | *@deprecated*: przeliczany przez `normalizeTaper` na `tipRatio = (1 − x)^curveRes`, `taperShape = 1`; `0` ignorowane. |
 | `baseSize` | `number` | `0 – 0.8` | `0.1` | Względny początek odgałęzień tego rzędu na rodzicu (dla `L1` używane jest `trunkHeightRatio`). |
 | `rotate` | `number` | `0 – 360` (°) | złoty kąt / sloty | Kąt obrotu kolejnych odgałęzień wokół rodzica. |
 | `rotateV` | `number` | `0 – 90` (°) | `~14` (`GOLDEN_JITTER`) | Losowy rozrzut kąta obrotu wokół rodzica. |

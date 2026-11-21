@@ -278,16 +278,17 @@ describe('Tree Studio E2E', () => {
       expect(anchor).toBeDefined();
       expect(anchor?.profile.crownSpreadRatio).toBe(testCrownSpread);
 
-      // Gatunek bazowy bez wpisu (POPLAR) w formacie Studio `anchors[]` → serwer tworzy wpis
-      expect(updatedRaw.some((f) => f.ref === 'POPLAR')).toBe(false);
+      // Syntetyczny rodzaj bez wpisu (nie dotyka prawdziwych wpisów) → serwer tworzy wpis na bazie `startSpecies`
+      const SYNTH = '__E2E_TEST_KIND__';
+      expect(updatedRaw.some((f) => f.ref === SYNTH)).toBe(false);
       const poplarAnchors = [9, 15].map((h) => ({ h, profile: cloneProfile(entry.profile) }));
       const resPoplar = await fetch(`http://127.0.0.1:${port}/api/save-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'POPLAR', anchors: poplarAnchors }),
+        body: JSON.stringify({ kind: SYNTH, startSpecies: 'POPLAR', anchors: poplarAnchors }),
       });
       expect(await resPoplar.json()).toEqual({ ok: true });
-      const poplar = (JSON.parse(fs.readFileSync(FITTED_PATH, 'utf8')) as FittedEntry[]).find((f) => f.ref === 'POPLAR');
+      const poplar = (JSON.parse(fs.readFileSync(FITTED_PATH, 'utf8')) as FittedEntry[]).find((f) => f.ref === SYNTH);
       expect(poplar?.startSpecies).toBe('POPLAR');
       expect(poplar?.heightAnchors?.map((a) => a.h)).toEqual([9, 15]);
 

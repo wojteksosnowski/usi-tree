@@ -23,6 +23,34 @@ const PRUNE_MARGIN = 0.94; // zapas na falowanie (oś symulowana bez niego)
 const SAG_REF_SLENDERNESS = 60; // smukłość L/r, przy której ugięcie = pliancy
 const SAG_MAX_SLENDERNESS = 4; // ograniczenie mnożnika smukłości (bardzo cienkie witki)
 
+/**
+ * Jedyne miejsce zgodności wstecznej: przeliczenie przestarzałych `trunkTaper` / `taper` (> 0) na
+ * `trunkTipRatio` / `tipRatio` + `taperShape = 1`. Wartość 0 lub brak jest ignorowana.
+ */
+export function normalizeTaper(profile: SpeciesProfile): SpeciesProfile {
+  const trunkX = profile.trunkTaper ?? 0;
+  const anyLevel = profile.levels.some((l) => (l.taper ?? 0) > 0);
+  if (!(trunkX > 0) && !anyLevel && profile.trunkTaper === undefined) return profile;
+  const out: SpeciesProfile = { ...profile };
+  delete out.trunkTaper;
+  if (trunkX > 0) {
+    out.trunkTipRatio = Math.max(0.05, 1 - trunkX);
+    out.taperShape = 1;
+  }
+  out.levels = profile.levels.map((l) => {
+    const n = { ...l };
+    delete n.taper;
+    if ((l.taper ?? 0) > 0) {
+      n.tipRatio = Math.pow(Math.max(0.05, 1 - l.taper!), Math.max(1, l.curveRes));
+      n.taperShape = 1;
+    } else if (trunkX > 0 && n.taperShape === undefined) {
+      n.taperShape = profile.taperShape ?? 0; // pień zmienia tylko własny kształt
+    }
+    return n;
+  });
+  return out;
+}
+
 export class GrowthContext {
   readonly envelope: CrownEnvelope;
   readonly flow: boolean;
@@ -40,7 +68,8 @@ export class GrowthContext {
     this.asymAz = asymAz;
   }
 
-  grow(profile: SpeciesProfile, prng: FastPrng, form: TrunkForm): Stem[] {
+  grow(inputProfile: SpeciesProfile, prng: FastPrng, form: TrunkForm): Stem[] {
+    const profile = normalizeTaper(inputProfile);
     const out: Stem[] = [];
     this.trunkCountScale = 1;
     this.clipLeaders = form !== 'SINGLE' || !!profile.scaffoldLimbs;
@@ -410,15 +439,10 @@ export class GrowthContext {
     const tipRatio = isTrunk
       ? tipRatioBase
       : Math.max(0.12, tipRatioBase * (pruneFactor < 1 ? Math.pow(pruneFactor, 0.35) : 1));
-    const taperPerSection = isTrunk ? profile.trunkTaper : p.taper;
-    // Wykładnik z długości (sekcja = 1/curveRes pędu), nie z liczby punktów: punkty odgałęzień nie przyspieszają zwężania
-    const taperSections = Math.max(1, p.curveRes);
-    // Pień: trunkTaper = ubytek całkowity (czubek = r0·(1 − x)); gałęzie: taper na sekcję
-    const taperExp = isTrunk ? 1 : taperSections;
+    // Kształt zwężania nie zmienia grubości czubka: 0 = liniowo, 1 = wykładniczo do tego samego czubka
+    const shape = Math.min(1, Math.max(0, (isTrunk ? profile.taperShape : (p.taperShape ?? profile.taperShape)) ?? 0));
     const radiusAt = (tt: number) =>
-      taperPerSection !== undefined
-        ? r0 * Math.pow(Math.max(0.05, 1 - taperPerSection), tt * taperExp)
-        : r0 * (1 - tt * (1 - tipRatio));
+      r0 * ((1 - shape) * (1 - tt * (1 - tipRatio)) + shape * Math.pow(tipRatio, tt));
 
     const stem: Stem = { level, px: [ox], py: [oy], pz: [oz], r: [r0], length, clipped: false };
     let x = ox,

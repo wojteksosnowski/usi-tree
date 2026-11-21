@@ -32,7 +32,8 @@ describe('rejestr rodzajów drzew 3D', () => {
     const plane = treeKindParams('Plane', 15);
     expect(plane.profile).toBeDefined();
     expect(plane.species).toBe('OAK');
-    expect(plane.profile?.crownSpreadRatio).toBeCloseTo(0.439, 2);
+    // krzywa trendu (lin/log/exp) przez węzły 6/9/15/24 m — także w samym węźle
+    expect(plane.profile?.crownSpreadRatio).toBeCloseTo(0.454, 2);
 
     const poplar = treeKindParams('Black Poplar', 24);
     expect(poplar.profile).toBeDefined();

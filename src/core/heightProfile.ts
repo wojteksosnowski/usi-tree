@@ -9,8 +9,8 @@
  *
  * Bez three: moduł wolno importować poza leniwym widokiem 3D.
  */
-import { CROWN_SHAPE_PEAK } from './speciesProfiles.js';
-import type { BranchLevelParams, CrownShape, SpeciesProfile } from './types.js';
+import { defaultBranchParam, defaultSpeciesParam, paramRange } from './paramSpec.js';
+import type { BranchLevelParams, SpeciesProfile } from './types.js';
 
 export interface HeightAnchor {
   h: number;
@@ -28,149 +28,6 @@ export interface CurveFitResult {
   eval: (h: number) => number;
 }
 
-const INTEGER_KEYS = new Set<string>(['count', 'curveRes', 'leafClump']);
-const POSITIVE_RATIO_KEYS = new Set<string>([
-  'trunkBaseRadiusRatio',
-  'trunkTipRatio',
-  'leafSizeRatio',
-  'lengthRatio',
-  'trunkLengthRatio',
-  'crownSpreadRatio',
-  'trunkHeightRatio',
-]);
-
-function defaultBranchLevelParam(lvl: Partial<BranchLevelParams>, key: string): number | undefined {
-  switch (key) {
-    case 'count':
-      return 1;
-    case 'downAngle':
-      return 45;
-    case 'downAngleV':
-      return 10;
-    case 'lengthRatio':
-      return 0.5;
-    case 'lengthV':
-      return 0.2;
-    case 'curve':
-      return 0;
-    case 'curveV':
-      return 8;
-    case 'curveRes':
-      return 3;
-    case 'tropism':
-      return 0;
-    case 'downAngleSlope':
-      return 0;
-    case 'kink':
-      return 15;
-    case 'fork':
-      return 0;
-    case 'tipRatio':
-      return (typeof lvl.fork === 'number' ? lvl.fork : 0) > 0 ? 0.35 : 0.22;
-    case 'taper':
-      return 0;
-    case 'curveBack':
-      return typeof lvl.curve === 'number' ? lvl.curve : 0;
-    case 'baseSize':
-      return 0.1;
-    case 'rotate':
-      return 180 * (3 - Math.sqrt(5));
-    case 'rotateV':
-      return (0.25 * 180) / Math.PI;
-    default:
-      return undefined;
-  }
-}
-
-function defaultSpeciesParam(profile: Partial<SpeciesProfile>, key: string, heightM = 10): number | undefined {
-  switch (key) {
-    case 'trunkHeightRatio':
-      return 0.24;
-    case 'trunkBaseRadiusRatio':
-      return 0.012;
-    case 'trunkLengthRatio':
-      return 0.9;
-    case 'trunkTipRatio':
-      return 0.3;
-    case 'trunkTaper':
-      return 0;
-    case 'trunkCurveV':
-      return 3;
-    case 'crownSpreadRatio':
-      return 0.35;
-    case 'twigStroke':
-      return 1;
-    case 'crownPeak':
-      return (profile.crownShape ? CROWN_SHAPE_PEAK[profile.crownShape as CrownShape] : undefined) ?? 0.4;
-    case 'ratioPower':
-      return 1.2;
-    case 'jitterStrength':
-      return 0.06;
-    case 'flareFactor':
-      return 1.12;
-    case 'radialSegments':
-      return 4;
-    case 'leafSizeRatio':
-      return 0.015;
-    case 'leafSizeCm':
-      return typeof profile.leafSizeRatio === 'number'
-        ? Number((profile.leafSizeRatio * Math.max(0.5, heightM) * 100).toFixed(2))
-        : 15;
-    case 'leafAspect':
-      return 0.55;
-    case 'petioleLengthRatio':
-      return 0.15;
-    case 'petiolePliancy':
-      return 0;
-    case 'leafFlatness':
-      return 0;
-    case 'leafClump':
-      return 4;
-    case 'leafDensity':
-      return 38;
-    case 'envelopeScale':
-      return 1.0;
-    case 'envelopeClipProbability':
-      return 0.72;
-    case 'trunkKink':
-      return 3;
-    case 'scaffoldLimbs':
-      return 0;
-    case 'trunkForkAngle':
-      return 20;
-    case 'trunkForkCount':
-      return 2;
-    case 'trunkForkAsymmetry':
-      return 0;
-    case 'trunkForkHeightRatio':
-      return typeof profile.trunkHeightRatio === 'number' ? Math.min(profile.trunkHeightRatio * 0.9, 0.265) : 0.24;
-    case 'trunkForkSideLength':
-      return 1;
-    case 'trunkForkSideRadius':
-      return 1;
-    case 'trunkForkMainAngleScale':
-      return 1;
-    case 'trunkLeanScale':
-      return 1;
-    case 'crownAsymmetry':
-      return 0;
-    case 'trunkForkTropism':
-      return 2.2;
-    case 'limbBreakProbability':
-      return 0;
-    case 'outwardBias':
-      return 0.5;
-    case 'twigGnarl':
-      return 1;
-    case 'kinkScale':
-      return 1;
-    case 'pliancy':
-      return 0;
-    default:
-      return undefined;
-  }
-}
-
 /**
  * Zwraca jawną wartość liczbową parametru z profilu (lub rzędu gałęzi `levelIdx`),
  * a gdy pole jest pominięte (`undefined`) — kanoniczną wartość domyślną silnika.
@@ -186,7 +43,7 @@ export function resolveNumericParam(
     if (!lvl) return undefined;
     const raw = (lvl as unknown as Record<string, unknown>)[key];
     if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
-    return defaultBranchLevelParam(lvl, key);
+    return defaultBranchParam(lvl, key);
   }
   const raw = (profile as unknown as Record<string, unknown>)[key];
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
@@ -290,20 +147,29 @@ function nearestIndex(sorted: readonly HeightAnchor[], h: number): number {
   return bestIdx;
 }
 
+/**
+ * Krzywa trendu z krawędziami: poniżej najniższego węzła liniowa kontynuacja stycznej w h0
+ * y(h0) − y'(h0)·(h0 − h) (ciągła wartość i nachylenie, zakres i tak przycina paramSpec),
+ * powyżej najwyższego kontynuacja logarytmiczna y(hN) + y'(hN)·hN·ln(h/hN) — ciągła wartość i nachylenie,
+ * wolniejszy wzrost niż liniowy/wykładniczy (brak wybuchów i zmian znaku przy dużych wysokościach).
+ */
+function evalBraked(f: (h: number) => number, h0: number, hN: number, h: number): number {
+  const eps = Math.max(1e-3, hN * 1e-4);
+  if (h < h0) {
+    const slope0 = (f(h0 + eps) - f(h0)) / eps;
+    return f(h0) - slope0 * (h0 - h);
+  }
+  if (h <= hN) return f(h);
+  const slope = (f(hN) - f(hN - eps)) / eps;
+  return f(hN) + slope * hN * Math.log(h / hN);
+}
+
 function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number, key: string): unknown {
   if (nodes.every((v) => typeof v === 'number')) {
     const pts = (nodes as number[]).map((y, i) => ({ h: hs[i], y }));
-    let v = fitParameterCurve(pts).eval(h);
-    if (key === 'leafSizeRatio') v = Math.max(0.003, v);
-    else if (key === 'trunkHeightRatio') v = Math.min(0.72, Math.max(1e-4, v));
-    else if (key === 'crownPeak') v = Math.min(0.95, Math.max(0.05, v));
-    else if (key === 'envelopeClipProbability') v = Math.min(1, Math.max(0, v));
-    else if (POSITIVE_RATIO_KEYS.has(key)) v = Math.max(1e-4, v);
-    else if (key === 'taper' || key === 'trunkTaper') v = Math.max(0, v);
-    if (INTEGER_KEYS.has(key)) {
-      const minInt = key === 'leafClump' ? 0 : 1;
-      return Math.max(minInt, Math.round(v));
-    }
+    const { min, max, integer } = paramRange(key);
+    let v = Math.min(max, Math.max(min, evalBraked(fitParameterCurve(pts).eval, hs[0], hs[hs.length - 1], h)));
+    if (integer) v = Math.max(Math.max(0, min), Math.round(v));
     return v;
   }
   if (nodes.every((v) => Array.isArray(v))) {
@@ -331,7 +197,7 @@ function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number,
         const filled = objs.map((o, idx) =>
           typeof o[k] === 'number'
             ? (o[k] as number)
-            : (defaultBranchLevelParam(o as Partial<BranchLevelParams>, k) ??
+            : (defaultBranchParam(o as Partial<BranchLevelParams>, k) ??
                defaultSpeciesParam(o as Partial<SpeciesProfile>, k, hs[idx]))
         );
         if (filled.every((v): v is number => typeof v === 'number')) {
@@ -351,9 +217,7 @@ function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number,
 /** Profil dla wysokości `h` z węzłów (dowolna kolejność, ≥ 1 węzeł) */
 export function profileAtHeight(anchors: readonly HeightAnchor[], h: number): SpeciesProfile {
   const sorted = anchors.filter((a) => typeof a?.h === 'number' && a?.profile).sort((x, y) => x.h - y.h);
-  if (sorted.length === 1 || h <= sorted[0].h) return structuredClone(sorted[0].profile);
-  const exact = sorted.find((a) => a.h === h);
-  if (exact) return structuredClone(exact.profile);
+  if (sorted.length === 1) return structuredClone(sorted[0].profile);
   const hs = sorted.map((a) => a.h);
   const nearIdx = nearestIndex(sorted, h);
   return evalAtNodes(sorted.map((a) => a.profile), hs, h, nearIdx, '') as SpeciesProfile;

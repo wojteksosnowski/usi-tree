@@ -27,6 +27,7 @@ export interface TreeGenerationParams {
   seed?: number;                // Ziarno PRNG dla powtarzalności
   radialSegments?: number;      // Liczba boków przekroju pnia (3-6, domyślnie 4)
   withFoliageAccents?: boolean; // Liście: płaskie kępki w 3 tonach (grupy materiałów 1 = jasny, 2 = średni, 3 = ciemny)
+  /** @deprecated use lod (TREE_LOD_PRESETS) */
   detail?: TreeDetail;          // Poziom szczegółowości siatki (LOD); szkielet jest wspólny dla wszystkich
   form?: TrunkForm;             // Pokrój pnia (domyślnie SINGLE)
   flow?: boolean;               // Płynne, cienkie gałązki: bez załamań i ostróg, łagodne wygięcia
@@ -171,11 +172,12 @@ export interface BranchLevelParams {
   fork: number;         // Kąt rozwidlenia „Y” na końcu pędu (stopnie, 0 = brak) — kontynuacja jak w ez-tree
   tipRatio?: number;    // Ułamek promienia pędu na końcu względem nasady (domyślnie: p.fork > 0 ? 0.5 : 0.22)
   /**
-   * Współczynnik zwężania grubości gałęzi na sekcję (0.0–1.0); nadpisuje `tipRatio`.
-   * @deprecated Zależy od liczby sekcji (`curveRes`): zmiana rozdzielczości pędu zmienia jego grubość. Użyj `tipRatio`.
-   * Żaden wbudowany ani dostrojony profil go nie ustawia; działa bez zmian dla zgodności wstecznej.
+   * @deprecated Użyj `tipRatio` (+ `taperShape`). Wartość > 0 jest przeliczana na
+   * `tipRatio = (1 − taper)^curveRes` i `taperShape = 1`; 0 jest ignorowane.
    */
   taper?: number;
+  /** Kształt zwężania (0 = liniowo, 1 = wykładniczo do tego samego czubka `tipRatio`); brak = wartość gatunku `taperShape`. */
+  taperShape?: number;
   // Rozszerzenia z Sapling Tree Gen (Weber–Penn); brak pola = dotychczasowy wynik
   curveBack?: number;   // Wygięcie drugiej połowy pędu (stopnie, + ku górze); wtedy `curve` działa na pierwszej połowie — łuk esowaty (konar brzozy: w górę, końcówka w dół)
   baseSize?: number;    // Początek odgałęzień tego rzędu na rodzicu (ułamek jego długości, domyślnie 0.1; konary na pniu — trunkHeightRatio)
@@ -189,10 +191,12 @@ export interface SpeciesProfile {
   trunkLengthRatio: number;      // Długość przewodnika / wysokość (< 1: przewodnik ginie w koronie)
   trunkTipRatio?: number;        // Ułamek promienia pnia na szczycie względem podstawy (domyślnie 0.3; < 0.15: przewodnik silnie zbieżny i zanika)
   /**
-   * Wykładnicze zwężanie pnia — ubytek całkowity: r(t) = r0·(1 − trunkTaper)^t, czubek = r0·(1 − trunkTaper)
-   * (0.5 = czubek o połowę cieńszy). Brak = liniowo do `trunkTipRatio`.
+   * @deprecated Użyj `trunkTipRatio` + `taperShape`. Wartość x > 0 jest przeliczana na
+   * `trunkTipRatio = 1 − x`, `taperShape = 1`; 0 jest ignorowane.
    */
   trunkTaper?: number;
+  /** Kształt zwężania pnia (0 = liniowo, domyślnie; 1 = wykładniczo do tego samego czubka `trunkTipRatio`); domyślny także dla poziomów bez własnego `taperShape`. */
+  taperShape?: number;
   trunkCurveV: number;           // Falowanie przewodnika (stopnie na segment)
   crownSpreadRatio: number;      // Skala długości konarów względem wysokości
   crownShape: CrownShape;

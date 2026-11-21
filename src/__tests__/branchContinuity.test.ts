@@ -171,3 +171,44 @@ describe('trunkTaper: zwężanie wykładnicze po długości pnia, niezależne od
     }, 30000);
   }
 });
+
+describe('taperShape: jedna wielkość grubości końca + ortogonalny kształt', () => {
+  const build = (mut: (p: any) => any, curveRes?: number) => {
+    const params = treeKindParams('BIRCH' as TreeKind, 12);
+    let profile: any = { ...params.profile!, levels: params.profile!.levels.map((l: any) => ({ ...l })) };
+    if (curveRes) profile.levels.forEach((l: any) => (l.curveRes = curveRes));
+    profile = mut(profile);
+    return TreeGenerator.buildSkeleton({ ...params, profile, height: 12, seed: 7 });
+  };
+  const radii = (sk: any) => sk.stems.map((s: any) => s.r);
+
+  it('taper: 0 / trunkTaper: 0 ≡ brak pola', () => {
+    const a = radii(build((p) => p));
+    const b = radii(build((p) => ({ ...p, trunkTaper: 0, levels: p.levels.map((l: any) => ({ ...l, taper: 0 })) })));
+    expect(b).toEqual(a);
+  });
+
+  it('trunkTaper x ≡ trunkTipRatio 1−x + taperShape 1 (identyczne promienie)', () => {
+    const a = radii(build((p) => ({ ...p, trunkTaper: 0.4 })));
+    const b = radii(build((p) => ({ ...p, trunkTipRatio: 0.6, taperShape: 1, levels: p.levels.map((l: any) => ({ ...l, taperShape: 0 })) })));
+    expect(b).toEqual(a);
+  });
+
+  it('czubek pnia niezależny od taperShape', () => {
+    const tip = (s: number) => {
+      const t = build((p) => ({ ...p, taperShape: s })).stems.find((x) => x.level === 0)!;
+      return t.r[t.r.length - 1] / t.r[0];
+    };
+    // Per-krokowy limiter 0.82 przy grubych sekcjach może nieznacznie podnieść/obniżyć ostatni pierścień
+    expect(Math.abs(tip(1) - tip(0))).toBeLessThan(0.02);
+  });
+
+  it('czubek gałęzi niezależny od curveRes przy taper → tipRatio', () => {
+    const tipOf = (cr: number) => {
+      const sk = build((p) => ({ ...p, levels: p.levels.map((l: any, i: number) => (i === 0 ? { ...l, taperShape: 1 } : l)) }), cr);
+      const st = sk.stems.filter((x) => x.level === 1)[0];
+      return st.r[st.r.length - 1] / st.r[0];
+    };
+    expect(Math.abs(tipOf(3) - tipOf(8))).toBeLessThan(0.05);
+  });
+});

@@ -12,6 +12,7 @@
 
 ## 2. Standardy Testowania (Vitest)
 - **Timeouty dla testów geometrii**: Złożone testy generujące siatki wielu drzew lub liście (foliage accents) muszą definiować jawny timeout (np. `it('...', () => { ... }, 30000)`), aby zapobiec fałszywym błędom po 5 sekundach.
+- **Niezależność od żywych profili**: Testy silnika (inwarianty LOD, sumy kontrolne siatek, ciągłość) NIE mogą zależeć od [src/core/fittedProfiles.json](file:///Volumes/Samsam/py/usi-tree/src/core/fittedProfiles.json) (stale strojony); używają bazowych profili gatunkowych lub zamrożonych fixture w `src/__tests__/fixtures/`. Testy przechodzące po żywych profilach sprawdzają wyłącznie własności odporne (niepusta siatka, brak NaN, monotoniczność liczby trójkątów).
 - **Weryfikacja Re-entrancy**: Każda zmiana w silniku generacji musi zachowywać zdawalność testów w [src/__tests__/reentrancy.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/reentrancy.test.ts).
 - **Prawdziwe testy E2E bez mocków**: Weryfikacja wpływu parametrów na geometrię 3D (`TreeGenerator.generateRaw`) oraz zapisu (`POST /api/save-profile`) w [src/__tests__/studioE2e.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/studioE2e.test.ts) musi działać na rzeczywistym silniku i serwerze HTTP (z kopią zapasową `fittedProfiles.json` w `try...finally`), bez żadnych mocków.
 - **Matematyczna ciągłość szkieletu (brak uskoków)**: Każda zmiana w [src/core/growthEngine.ts](file:///Volumes/Samsam/py/usi-tree/src/core/growthEngine.ts) musi przechodzić testy w [src/__tests__/branchContinuity.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/branchContinuity.test.ts):
@@ -32,7 +33,7 @@
   - Ochrona budżetu pędów: liczba pędów kandydata nie może spaść o więcej niż 20% względem gatunku bazowego.
 
 ## 5. Ontogeneza, Liście, Wiatr i Tree Studio (`scripts/tree-studio.ts`)
-- **Ciągłe dopasowanie krzywych wysokości (`heightProfile.ts`)**: Parametry zmienne między węzłami `heightAnchors` są dopasowywane przez `fitParameterCurve` (2 węzły: liniowo; ≥ 3 węzły: wybór najlepszego modelu z `{liniowa, logarytmiczna, wykładnicza}` wg SSE) z płynną ekstrapolacją powyżej ostatniego węzła (> 24 m).
+- **Ciągłe dopasowanie krzywych wysokości (`heightProfile.ts`)**: Parametry zmienne między węzłami `heightAnchors` są dopasowywane przez `fitParameterCurve` (2 węzły: liniowo; ≥ 3 węzły: wybór najlepszego modelu z `{liniowa, logarytmiczna, wykładnicza}` wg SSE) z płynną ekstrapolacją powyżej ostatniego węzła (> 24 m). Krzywa obowiązuje także w samych węzłach (bez skoku do surowego węzła); poniżej najniższego liniowa kontynuacja stycznej krzywej w h0; powyżej ostatniego węzła kontynuacja logarytmiczna z nachyleniem krzywej w hN. Domyślne wartości i zakresy `[min, max]` (przycięcie krzywej, liczby całkowite) wyłącznie w [src/core/paramSpec.ts](file:///Volumes/Samsam/py/usi-tree/src/core/paramSpec.ts).
 - **Geometria liści i szypułki (`meshExtruder.ts`)**:
   - Obrysy liści (`tri` 1 trójkąt, `quad` 2 trójkąty, `penta` 3 trójkąty, `hex` 4 trójkąty oraz `leafOutline`) są symetryczne osiowo (`across = 0`) i przypięte wierzchołkiem `(0, 0)` do końca szypułki (`petioleLengthRatio` odsuwa nasadę blaszki od pędu i nie generuje trójkątów).
   - Rozmiar liścia może być zadany absolutnie w centymetrach (`leafSizeCm`), co ma priorytet nad `leafSizeRatio`.

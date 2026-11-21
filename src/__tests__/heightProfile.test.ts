@@ -61,13 +61,13 @@ describe('profil zależny od wysokości', () => {
     expect(p12.pliancy!).toBeGreaterThan(2);
     expect(p12.pliancy!).toBeLessThan(18);
 
-    // Opcjonalne parametry rzędu gałęzi (tipRatio, taper) ustawione tylko w jednym węźle
+    // Opcjonalne parametry rzędu gałęzi (tipRatio, taperShape) ustawione tylko w jednym węźle
     const a6 = structuredClone(base);
     const a24 = structuredClone(base);
     delete a6.levels[0].tipRatio;
-    delete a6.levels[0].taper;
+    delete a6.levels[0].taperShape;
     a24.levels[0].tipRatio = 0.62;
-    a24.levels[0].taper = 0.4;
+    a24.levels[0].taperShape = 0.4;
     const mid15 = profileAtHeight(
       [
         { h: 6, profile: a6 },
@@ -75,19 +75,33 @@ describe('profil zależny od wysokości', () => {
       ],
       15
     );
-    // 2 węzły -> liniowo w połowie między kanonicznym domyślnym (tipRatio=0.22, taper=0) a (0.62, 0.4)
+    // 2 węzły -> liniowo w połowie między kanonicznym domyślnym (tipRatio=0.22, taperShape=0) a (0.62, 0.4)
     expect(mid15.levels[0].tipRatio).toBeCloseTo((0.22 + 0.62) / 2, 4);
-    expect(mid15.levels[0].taper).toBeCloseTo(0.2, 4);
+    expect(mid15.levels[0].taperShape).toBeCloseTo(0.2, 4);
 
     // 1 wartość / stałe wartości -> const
     expect(fitParameterCurve([{ h: 10, y: 5 }]).kind).toBe('const');
     expect(fitParameterCurve([{ h: 6, y: 5 }, { h: 15, y: 5 }, { h: 24, y: 5 }]).kind).toBe('const');
   });
 
-  it('w węzłach zwraca dokładnie strojony profil, poniżej najniższego — najniższy', () => {
+  it('poniżej najniższego węzła liniowa kontynuacja stycznej (nie zamrożenie na h0)', () => {
+    const lo = { trunkHeightRatio: 0.2, levels: [{ count: 10, downAngle: 40 }] } as unknown as SpeciesProfile;
+    const hi = { trunkHeightRatio: 0.3, levels: [{ count: 20, downAngle: 60 }] } as unknown as SpeciesProfile;
+    const A = [{ h: 6, profile: lo }, { h: 24, profile: hi }];
+    expect(profileAtHeight(A, 3).trunkHeightRatio).toBeCloseTo(0.2 - (0.1 / 18) * 3, 6);
+    expect(profileAtHeight(A, 3).levels[0].downAngle).toBeCloseTo(40 - (20 / 18) * 3, 6);
+    expect(profileAtHeight(A, 6 - 1e-3).trunkHeightRatio).toBeCloseTo(0.2, 4);
+  });
+
+  it('w węzłach obowiązuje krzywa (bez skoku do surowego węzła); 2 węzły odtwarzane dokładnie', () => {
     for (const e of entries) {
-      for (const a of e.heightAnchors!) expect(profileAtHeight(e.heightAnchors!, a.h)).toEqual(a.profile);
-      expect(profileAtHeight(e.heightAnchors!, 3)).toEqual(e.heightAnchors![0].profile);
+      const A = e.heightAnchors!;
+      expect(profileAtHeight(A, A[0].h - 1e-3).crownSpreadRatio).toBeCloseTo(profileAtHeight(A, A[0].h).crownSpreadRatio, 4);
+      for (const a of A) {
+        const at = profileAtHeight(A, a.h);
+        expect(profileAtHeight(A, a.h + 1e-3).crownSpreadRatio).toBeCloseTo(at.crownSpreadRatio, 4);
+      }
+      if (A.length === 2) for (const a of A) expect(profileAtHeight(A, a.h).crownSpreadRatio).toBeCloseTo(a.profile.crownSpreadRatio, 9);
     }
   });
 
@@ -194,5 +208,18 @@ describe('profil zależny od wysokości', () => {
 
     expect(treeKindParams('BUSH', 3).profile).toEqual(SPECIES_PROFILES.BUSH);
     expect(treeKindParams('BUSH', 6).profile!.levels[0].count).toBeGreaterThan(SPECIES_PROFILES.BUSH.levels[0].count);
+  });
+});
+
+describe('taperShape: interpolacja bez przełączania modelu', () => {
+  it('węzły z i bez taperShape dają gładką krzywą', () => {
+    const base: any = { trunkHeightRatio: 0.2, levels: [{ count: 10, downAngle: 40 }] };
+    const a = structuredClone(base);
+    const b = structuredClone(base);
+    b.taperShape = 1;
+    const A = [{ h: 6, profile: a }, { h: 24, profile: b }];
+    const v = [8, 12, 15, 20].map((h) => profileAtHeight(A as any, h).taperShape as number);
+    for (let i = 1; i < v.length; i++) expect(v[i]).toBeGreaterThan(v[i - 1]);
+    expect(v[2]).toBeCloseTo(0.5, 1);
   });
 });

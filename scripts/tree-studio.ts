@@ -11,6 +11,7 @@ import http from 'node:http';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
 import { SPECIES_PROFILES as BASE_PROFILES } from '../src/core/speciesProfiles';
+import { normalizeTaper } from '../src/core/growthEngine';
 import { treeKindParams as baseKindParams } from '../src/core/treeSpeciesRegistry';
 
 const PORT = Number(process.env.PORT ?? 4173);
@@ -40,8 +41,8 @@ import {
   scaleProfileByHeight,
 } from '${path.resolve('src/core/heightProfile').replace(/\\\\/g, '/')}';
 import { CrownEnvelope, crownRatio } from '${path.resolve('src/core/crownEnvelope').replace(/\\\\/g, '/')}';
-import { countMeshTriangles } from '${path.resolve('src/core/treeLod').replace(/\\\\/g, '/')}';
-import type { SpeciesProfile, TrunkForm, TreeDetail, CrownShape } from '${path.resolve('src/core/types').replace(/\\\\/g, '/')}';
+import { countMeshTriangles, TREE_LOD_PRESETS } from '${path.resolve('src/core/treeLod').replace(/\\\\/g, '/')}';
+import type { SpeciesProfile, TrunkForm, TreeDetail, TreeMeshLod, CrownShape } from '${path.resolve('src/core/types').replace(/\\\\/g, '/')}';
 
 const ANCHOR_HEIGHTS = [6, 9, 15, 24] as const;
 const CROWN_SHAPES: CrownShape[] = [
@@ -64,7 +65,7 @@ let currentKind: TreeKind = 'BIRCH';
 let currentHeight = 15;
 let currentSeed = 42;
 let currentForm: TrunkForm = 'SINGLE';
-let currentDetail: TreeDetail = 'HIGH';
+let currentLod = '';
 type Season = 'SPRING' | 'SUMMER' | 'AUTUMN' | 'WINTER';
 let currentSeason: Season = 'SUMMER';
 let showFoliage = true;
@@ -76,6 +77,7 @@ let currentSkeleton: ReturnType<typeof TreeGenerator.buildSkeleton> | null = nul
 let currentRenderOpts: {
   withFoliageAccents: boolean;
   detail: TreeDetail;
+  lod?: TreeMeshLod;
   stroke: typeof ILLUSTRATION_STROKE;
 } | null = null;
 let currentCamera: THREE.OrthographicCamera | null = null;
@@ -296,7 +298,7 @@ function updateLeafPreview(profile: SpeciesProfile, species: string) {
 let lastChartTarget: { sectionTitle: string; label: string } = { sectionTitle: 'Pień i korona', label: 'trunkHeightRatio' };
 
 function getParamValue(p: SpeciesProfile, sectionTitle: string, label: string, heightM = currentHeight): number | undefined {
-  const m = sectionTitle.match(/L(\d+)/);
+  const m = sectionTitle.match(/L(\\d+)/);
   const levelIdx = m ? parseInt(m[1], 10) - 1 : null;
   return resolveNumericParam(p, levelIdx, label, heightM);
 }
@@ -310,8 +312,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   trunkBaseRadiusRatio: 'Promień pnia u podstawy względem wysokości drzewa.',
   trunkLengthRatio: 'Długość przewodnika (pnia głównego) względem wysokości drzewa.',
   trunkTipRatio: 'Stosunek promienia czubka pnia do promienia u podstawy.',
-  trunkTaper: 'Zwężanie wykładnicze pnia, ubytek całkowity: czubek = r0·(1 − x), np. 0.5 = czubek o połowę cieńszy (0 = wyłączone, działa trunkTipRatio).',
-  taper: 'Współczynnik zwężania grubości gałęzi na sekcję (0.0–1.0).',
+  taperShape: 'Kształt zwężania: 0 = liniowo, 1 = wykładniczo do tego samego czubka (czubek zadaje tipRatio / trunkTipRatio). Poziom bez własnej wartości dziedziczy wartość gatunku.',
   trunkCurveV: 'Losowe wygięcie/krzywizna pnia głównego (stopnie).',
   ratioPower: 'Wykładnik reguły rur: jak szybko zwężają się gałęzie potomne względem rodzica.',
   flareFactor: 'Rozszerzenie (napływ korzeniowy) pnia przy samej ziemi.',
@@ -485,7 +486,8 @@ function renderTree() {
   });
   currentRenderOpts = {
     withFoliageAccents: effectiveFoliage,
-    detail: currentDetail,
+    detail: 'HIGH',
+    lod: currentLod ? { ...TREE_LOD_PRESETS[currentLod as keyof typeof TREE_LOD_PRESETS] } : undefined,
     stroke: ILLUSTRATION_STROKE,
   };
   const wind = windEnabled && windStrength > 0
@@ -750,7 +752,7 @@ function buildParamInputs() {
     { label: 'trunkBaseRadiusRatio', type: 'number', step: 0.001, min: 0.002, max: 0.05, value: profile.trunkBaseRadiusRatio, onChange: (v) => updateField((p, x) => (p.trunkBaseRadiusRatio = x), v) },
     { label: 'trunkLengthRatio', type: 'number', step: 0.02, min: 0.2, max: 1.0, value: profile.trunkLengthRatio, onChange: (v) => updateField((p, x) => (p.trunkLengthRatio = x), v) },
     { label: 'trunkTipRatio', type: 'number', step: 0.01, min: 0.01, max: 0.5, value: resolveNumericParam(profile, null, 'trunkTipRatio') ?? 0.3, onChange: (v) => updateField((p, x) => (p.trunkTipRatio = x), v) },
-    { label: 'trunkTaper', type: 'number', step: 0.05, min: 0, max: 0.95, value: profile.trunkTaper ?? 0, onChange: (v) => updateField((p, x) => { if (x > 0) p.trunkTaper = x; else delete p.trunkTaper; }, v) },
+    { label: 'taperShape', type: 'number', step: 0.05, min: 0, max: 1, value: profile.taperShape ?? 0, onChange: (v) => updateField((p, x) => { if (x > 0) p.taperShape = x; else delete p.taperShape; }, v) },
     { label: 'trunkCurveV', type: 'number', step: 0.5, min: 0, max: 30, value: profile.trunkCurveV, onChange: (v) => updateField((p, x) => (p.trunkCurveV = x), v) },
     { label: 'ratioPower', type: 'number', step: 0.05, min: 0.5, max: 2.5, value: profile.ratioPower, onChange: (v) => updateField((p, x) => (p.ratioPower = x), v) },
     { label: 'flareFactor', type: 'number', step: 0.02, min: 1.0, max: 2.0, value: profile.flareFactor, onChange: (v) => updateField((p, x) => (p.flareFactor = x), v) },
@@ -803,7 +805,7 @@ function buildParamInputs() {
       { label: 'curveV', type: 'number', step: 2, min: 0, max: 45, value: lvl.curveV, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].curveV = x; }, v) },
       { label: 'tropism', type: 'number', step: 0.05, min: -3, max: 1, value: lvl.tropism, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tropism = x; }, v) },
       { label: 'fork', type: 'number', step: 1, min: 0, max: 60, value: lvl.fork, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].fork = x; }, v) },
-      { label: 'taper', type: 'number', step: 0.05, min: 0, max: 0.95, value: lvl.taper ?? 0, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) { if (x > 0) p.levels[idx].taper = x; else delete p.levels[idx].taper; } }, v) },
+      { label: 'taperShape', type: 'number', step: 0.05, min: 0, max: 1, value: lvl.taperShape ?? profile.taperShape ?? 0, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].taperShape = x; }, v) },
       { label: 'tipRatio', type: 'number', step: 0.02, min: 0.05, max: 1, value: resolveNumericParam(profile, idx, 'tipRatio') ?? 0.22, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tipRatio = x; }, v) },
     ]);
   });
@@ -837,8 +839,8 @@ function initEvents() {
     currentForm = (e.target as HTMLSelectElement).value as TrunkForm;
     renderTree();
   };
-  (document.getElementById('detail-select') as HTMLSelectElement).onchange = (e) => {
-    currentDetail = (e.target as HTMLSelectElement).value as TreeDetail;
+  (document.getElementById('lod-select') as HTMLSelectElement).onchange = (e) => {
+    currentLod = (e.target as HTMLSelectElement).value;
     renderTree();
   };
   (document.getElementById('foliage-check') as HTMLInputElement).onchange = (e) => {
@@ -1060,11 +1062,13 @@ const HTML_PAGE = `<!DOCTYPE html>
             <option value="MULTI">MULTI</option>
           </select>
         </label>
-        <label class="ctrl">Szczegółowość
-          <select id="detail-select">
-            <option value="HIGH">HIGH</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="LOW">LOW</option>
+        <label class="ctrl">LOD
+          <select id="lod-select">
+            <option value="">pełna (bez LOD)</option>
+            <option value="near">near</option>
+            <option value="mid">mid</option>
+            <option value="far">far</option>
+            <option value="shell">shell</option>
           </select>
         </label>
         <label class="ctrl">Ziarno (seed)
@@ -1175,7 +1179,14 @@ async function main() {
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         try {
-          const { kind, height, profile, anchors } = JSON.parse(body);
+          const parsed = JSON.parse(body);
+          const { kind, height, startSpecies } = parsed;
+          // Stare klucze (taper/trunkTaper) są normalizowane przed zapisem
+          const norm = (p: any) => (p && typeof p === 'object' && Array.isArray(p.levels) ? normalizeTaper(p) : p);
+          const profile = norm(parsed.profile);
+          const anchors = Array.isArray(parsed.anchors)
+            ? parsed.anchors.map((a: any) => (a ? { ...a, profile: norm(a.profile) } : a))
+            : parsed.anchors;
           // Bez walidacji JSON.stringify zapisze węzeł `{}` (h i profile undefined) i zepsuje heightAnchors
           const checkAnchor = (h: unknown, p: any) => {
             if (typeof h !== 'number' || !Number.isFinite(h)) throw new Error('Brak poprawnej wysokości węzła (height)');
@@ -1185,7 +1196,9 @@ async function main() {
           let entry = fitted.find((f: any) => f.ref === kind);
           if (!entry) {
             // Gatunek bazowy bez wpisu (np. POPLAR): tworzymy wpis jak dla BIRCH/PINE
-            if (typeof kind !== 'string' || !(kind in BASE_PROFILES)) {
+            // Nowy rodzaj spoza bazy wymaga jawnego `startSpecies` (gatunek bazowy)
+            const baseSpecies = typeof kind === 'string' && kind in BASE_PROFILES ? kind : startSpecies;
+            if (typeof kind !== 'string' || typeof baseSpecies !== 'string' || !(baseSpecies in BASE_PROFILES)) {
               throw new Error(`Gatunek "${kind}" nie ma wpisu w fittedProfiles.json ani w gatunkach bazowych`);
             }
             const saved: { h: number; profile: any }[] = Array.isArray(anchors)
@@ -1197,8 +1210,8 @@ async function main() {
             if (!ref10) throw new Error('Brak poprawnej wysokości węzła (height)');
             entry = {
               ref: kind,
-              startSpecies: kind,
-              form: baseKindParams(kind as any).form,
+              startSpecies: baseSpecies,
+              form: baseKindParams(baseSpecies as any).form,
               profile: structuredClone(ref10.profile),
               heightAnchors: [],
             };
