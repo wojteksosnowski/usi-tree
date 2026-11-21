@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "usi-tree": {
+      "type": "stdio",
+      "command": "/Volumes/Samsam/py/usi-tree/node_modules/.bin/tsx",
+      "args": ["/Volumes/Samsam/py/usi-tree/scripts/tree-mcp.ts"],
+      "env": { "NODE_NO_WARNINGS": "1" }
+    }
+  }
+}

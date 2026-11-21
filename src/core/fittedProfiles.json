@@ -626,23 +626,37 @@
           "kinkScale": 0.3,
           "trunkFork": false,
           "trunkForkAngle": 20,
-          "leafDensity": 53,
+          "leafDensity": 38,
           "crownPeak": 0.3,
           "twigStroke": 0.75,
           "trunkForkHeightRatio": 0.24,
           "trunkForkAsymmetry": 0.4,
-          "trunkLeanScale": 0.5
+          "trunkLeanScale": 0.5,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.809,
+            0.548,
+            1.05,
+            0,
+            0.809,
+            -0.548
+          ],
+          "leafClump": 5,
+          "petioleLengthRatio": 0.2,
+          "petiolePliancy": 0.5
         }
       },
       {
         "h": 9,
         "profile": {
           "trunkHeightRatio": 0.13,
-          "trunkBaseRadiusRatio": 0.013,
-          "trunkLengthRatio": 0.77,
+          "trunkBaseRadiusRatio": 0.014,
+          "trunkLengthRatio": 0.8,
           "trunkTipRatio": 0.1,
           "trunkCurveV": 3,
-          "crownSpreadRatio": 0.359,
+          "crownSpreadRatio": 0.37,
           "crownShape": "SPHERICAL",
           "ratioPower": 1.18,
           "trunkFork": true,
@@ -692,7 +706,7 @@
           "flareFactor": 1.15,
           "radialSegments": 4,
           "leafSizeRatio": 0.0184,
-          "leafDensity": 91,
+          "leafDensity": 48,
           "leafAspect": 0.9,
           "limbsReachEnvelope": true,
           "envelopeClipProbability": 0.65,
@@ -705,18 +719,30 @@
           "twigStroke": 0.75,
           "trunkForkHeightRatio": 0.24,
           "trunkForkAsymmetry": 0.4,
-          "trunkLeanScale": 0.5
+          "trunkLeanScale": 0.5,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.809,
+            0.548,
+            1.05,
+            0,
+            0.809,
+            -0.548
+          ],
+          "leafClump": 5
         }
       },
       {
         "h": 15,
         "profile": {
-          "trunkHeightRatio": 0.09,
+          "trunkHeightRatio": 0.1,
           "trunkBaseRadiusRatio": 0.016,
           "trunkLengthRatio": 0.76,
           "trunkTipRatio": 0.1,
           "trunkCurveV": 3,
-          "crownSpreadRatio": 0.461,
+          "crownSpreadRatio": 0.38,
           "crownShape": "SPHERICAL",
           "ratioPower": 1.16,
           "trunkFork": true,
@@ -766,12 +792,12 @@
           "flareFactor": 1.18,
           "radialSegments": 4,
           "leafSizeRatio": 0.0149,
-          "leafDensity": 119,
+          "leafDensity": 54,
           "leafAspect": 0.9,
           "limbsReachEnvelope": true,
           "envelopeClipProbability": 0.65,
           "prune": true,
-          "outwardBias": 0.55,
+          "outwardBias": 0.5,
           "phyllotaxis": "golden",
           "twigGnarl": 0.15,
           "kinkScale": 0.35,
@@ -779,7 +805,19 @@
           "twigStroke": 0.75,
           "trunkForkHeightRatio": 0.24,
           "trunkForkAsymmetry": 0.4,
-          "trunkLeanScale": 0.5
+          "trunkLeanScale": 0.5,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.809,
+            0.548,
+            1.05,
+            0,
+            0.809,
+            -0.548
+          ],
+          "leafClump": 5
         }
       },
       {
@@ -787,12 +825,12 @@
         "profile": {
           "trunkHeightRatio": 0.07,
           "trunkBaseRadiusRatio": 0.02,
-          "trunkLengthRatio": 0.76,
+          "trunkLengthRatio": 0.72,
           "trunkTipRatio": 0.1,
-          "trunkCurveV": 3,
+          "trunkCurveV": 5,
           "crownSpreadRatio": 0.395,
           "crownShape": "SPHERICAL",
-          "ratioPower": 1.16,
+          "ratioPower": 1.5,
           "trunkFork": true,
           "trunkForkAngle": 42,
           "levels": [
@@ -836,16 +874,16 @@
               "lengthRatio": 0.5
             }
           ],
-          "jitterStrength": 0.06,
-          "flareFactor": 1.18,
+          "jitterStrength": 0,
+          "flareFactor": 1,
           "radialSegments": 4,
           "leafSizeRatio": 0.0149,
-          "leafDensity": 119,
+          "leafDensity": 60,
           "leafAspect": 0.9,
           "limbsReachEnvelope": true,
           "envelopeClipProbability": 0.65,
           "prune": true,
-          "outwardBias": 0.55,
+          "outwardBias": 0.45,
           "phyllotaxis": "golden",
           "twigGnarl": 0.15,
           "kinkScale": 0.35,
@@ -853,7 +891,22 @@
           "twigStroke": 0.75,
           "trunkForkHeightRatio": 0.19,
           "trunkForkAsymmetry": 0.3,
-          "trunkLeanScale": 0.5
+          "trunkLeanScale": 0.5,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.809,
+            0.548,
+            1.05,
+            0,
+            0.809,
+            -0.548
+          ],
+          "leafClump": 5,
+          "pliancy": 0,
+          "petiolePliancy": 0.5,
+          "petioleLengthRatio": 0.2
         }
       }
     ]
@@ -2452,7 +2505,7 @@
               "curveRes": 5,
               "tropism": 0,
               "fork": 0,
-              "count": 26,
+              "count": 18,
               "downAngle": 42,
               "downAngleSlope": 25,
               "lengthRatio": 1
@@ -2485,7 +2538,7 @@
           "jitterStrength": 0.06,
           "flareFactor": 1.12,
           "radialSegments": 4,
-          "leafSizeRatio": 0.012,
+          "leafSizeRatio": 0.01,
           "leafAspect": 0.7,
           "pliancy": 2,
           "prune": true,
@@ -2495,7 +2548,23 @@
           "kinkScale": 0.4,
           "disableEnvelope": false,
           "leafDensity": 38,
-          "crownPeak": 0.35
+          "crownPeak": 0.35,
+          "leafShape": "penta",
+          "leafOutline": [
+            0.009,
+            0,
+            0.3,
+            1.03,
+            0.9,
+            0.64,
+            0.9,
+            -0.64,
+            0.3,
+            -1.03
+          ],
+          "petioleLengthRatio": 0.5,
+          "petiolePliancy": 0.5,
+          "leafSizeCm": 6
         }
       },
       {
@@ -2506,7 +2575,7 @@
           "trunkLengthRatio": 0.88,
           "trunkTipRatio": 0.08,
           "trunkCurveV": 4,
-          "crownSpreadRatio": 0.28,
+          "crownSpreadRatio": 0.29,
           "crownShape": "TEND_FLAME",
           "disableEnvelope": true,
           "ratioPower": 1.25,
@@ -2519,7 +2588,7 @@
               "curveRes": 5,
               "tropism": -0.2,
               "fork": 0,
-              "count": 16,
+              "count": 18,
               "downAngle": 45,
               "downAngleSlope": 20,
               "lengthRatio": 1
@@ -2552,7 +2621,7 @@
           "jitterStrength": 0.06,
           "flareFactor": 1.14,
           "radialSegments": 4,
-          "leafSizeRatio": 0.013,
+          "leafSizeRatio": 0.010555555555555556,
           "leafAspect": 0.7,
           "pliancy": 2.6,
           "prune": false,
@@ -2561,21 +2630,37 @@
           "twigGnarl": 0.3,
           "kinkScale": 0.4,
           "leafDensity": 38,
-          "crownPeak": 0.2
+          "crownPeak": 0.2,
+          "leafShape": "penta",
+          "leafOutline": [
+            0.009,
+            0,
+            0.3,
+            1.03,
+            0.9,
+            0.64,
+            0.9,
+            -0.64,
+            0.3,
+            -1.03
+          ],
+          "petioleLengthRatio": 0.5,
+          "petiolePliancy": 0.5,
+          "leafSizeCm": 9.5
         }
       },
       {
         "h": 15,
         "profile": {
-          "trunkHeightRatio": 0.19,
-          "trunkBaseRadiusRatio": 0.01,
+          "trunkHeightRatio": 0.14,
+          "trunkBaseRadiusRatio": 0.011,
           "trunkLengthRatio": 0.88,
           "trunkTipRatio": 0.08,
           "trunkCurveV": 4,
           "crownSpreadRatio": 0.28,
           "crownShape": "TEND_FLAME",
           "disableEnvelope": true,
-          "ratioPower": 1.25,
+          "ratioPower": 1.2,
           "levels": [
             {
               "downAngleV": 8,
@@ -2616,18 +2701,34 @@
             }
           ],
           "jitterStrength": 0.06,
-          "flareFactor": 1.15,
+          "flareFactor": 1.16,
           "radialSegments": 4,
-          "leafSizeRatio": 0.009,
+          "leafSizeRatio": 0.005625000000000001,
           "leafDensity": 75,
           "leafAspect": 0.7,
-          "pliancy": 2.6,
-          "prune": false,
+          "pliancy": 5,
+          "prune": true,
           "outwardBias": 0.5,
           "phyllotaxis": "golden",
           "twigGnarl": 0.3,
           "kinkScale": 0.4,
-          "crownPeak": 0.35
+          "crownPeak": 0.35,
+          "leafShape": "penta",
+          "leafOutline": [
+            0.009,
+            0,
+            0.3,
+            1.03,
+            0.9,
+            0.64,
+            0.9,
+            -0.64,
+            0.3,
+            -1.03
+          ],
+          "petioleLengthRatio": 0.5,
+          "petiolePliancy": 0.5,
+          "leafSizeCm": 13.5
         }
       }
     ]
@@ -3147,7 +3248,7 @@
           "trunkBaseRadiusRatio": 0.011,
           "trunkLengthRatio": 0.97,
           "trunkCurveV": 3,
-          "crownSpreadRatio": 0.253,
+          "crownSpreadRatio": 0.4,
           "crownShape": "CONICAL",
           "ratioPower": 1.2,
           "levels": [
@@ -3194,9 +3295,9 @@
           "jitterStrength": 0.08,
           "flareFactor": 1.12,
           "radialSegments": 4,
-          "leafSizeRatio": 0.014,
+          "leafSizeRatio": 0.023333333333333334,
           "leafAspect": 0.18,
-          "leafClump": 9,
+          "leafClump": 5,
           "trunkKink": 0,
           "tipSpurs": false,
           "prune": true,
@@ -3206,18 +3307,31 @@
           "kinkScale": 0.6,
           "leafDensity": 110,
           "twigStroke": 0.7,
-          "trunkTipRatio": 0.01
+          "trunkTipRatio": 0.01,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            1.173,
+            7.99,
+            0.173,
+            0,
+            1.173,
+            -7.99
+          ],
+          "crownPeak": 0.55,
+          "leafSizeCm": 14
         }
       },
       {
         "h": 9,
         "profile": {
           "trunkHeightRatio": 0.33,
-          "trunkBaseRadiusRatio": 0.011,
-          "trunkLengthRatio": 0.97,
-          "trunkTipRatio": 0.3,
+          "trunkBaseRadiusRatio": 0.013,
+          "trunkLengthRatio": 0.9,
+          "trunkTipRatio": 0.01,
           "trunkCurveV": 3,
-          "crownSpreadRatio": 0.286,
+          "crownSpreadRatio": 0.37,
           "crownShape": "UMBRELLA",
           "ratioPower": 1.2,
           "levels": [
@@ -3266,9 +3380,9 @@
           "jitterStrength": 0.08,
           "flareFactor": 1.12,
           "radialSegments": 4,
-          "leafSizeRatio": 0.014,
+          "leafSizeRatio": 0.016666666666666666,
           "leafAspect": 0.18,
-          "leafClump": 9,
+          "leafClump": 6,
           "trunkKink": 0,
           "tipSpurs": false,
           "prune": true,
@@ -3277,18 +3391,31 @@
           "twigGnarl": 0.3,
           "kinkScale": 0.6,
           "leafDensity": 95,
-          "twigStroke": 0.7
+          "twigStroke": 0.7,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            1.173,
+            7.99,
+            0.173,
+            0,
+            1.173,
+            -7.99
+          ],
+          "crownPeak": 0.55,
+          "leafSizeCm": 15
         }
       },
       {
         "h": 15,
         "profile": {
           "trunkHeightRatio": 0.55,
-          "trunkBaseRadiusRatio": 0.011,
-          "trunkLengthRatio": 0.97,
-          "trunkTipRatio": 0.3,
+          "trunkBaseRadiusRatio": 0.015,
+          "trunkLengthRatio": 0.9,
+          "trunkTipRatio": 0.01,
           "trunkCurveV": 3,
-          "crownSpreadRatio": 0.209,
+          "crownSpreadRatio": 0.33,
           "crownShape": "UMBRELLA",
           "ratioPower": 1.2,
           "levels": [
@@ -3337,9 +3464,9 @@
           "jitterStrength": 0.08,
           "flareFactor": 1.12,
           "radialSegments": 4,
-          "leafSizeRatio": 0.014,
+          "leafSizeRatio": 0.011000000000000001,
           "leafAspect": 0.18,
-          "leafClump": 9,
+          "leafClump": 6,
           "trunkKink": 0,
           "tipSpurs": false,
           "prune": true,
@@ -3348,7 +3475,19 @@
           "twigGnarl": 0.3,
           "kinkScale": 0.6,
           "leafDensity": 95,
-          "twigStroke": 0.7
+          "twigStroke": 0.7,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            1.173,
+            7.99,
+            0.173,
+            0,
+            1.173,
+            -7.99
+          ],
+          "leafSizeCm": 16.5
         }
       }
     ]
@@ -3495,12 +3634,12 @@
           "kinkScale": 0.3,
           "trunkFork": false,
           "trunkForkAngle": 20,
-          "leafDensity": 5,
+          "leafDensity": 4,
           "crownPeak": 0.4,
           "twigStroke": 0.6,
           "trunkForkHeightRatio": 0.24,
           "trunkForkAsymmetry": 0.7,
-          "leafClump": 4,
+          "leafClump": 2,
           "leafSizeCm": 15
         }
       },
@@ -3514,7 +3653,7 @@
           "trunkCurveV": 3,
           "crownSpreadRatio": 0.36,
           "crownShape": "SPHERICAL",
-          "ratioPower": 1.18,
+          "ratioPower": 1.15,
           "trunkFork": true,
           "trunkForkAngle": 26,
           "levels": [
@@ -3574,8 +3713,9 @@
           "twigStroke": 0.6,
           "trunkForkHeightRatio": 0.24,
           "trunkForkAsymmetry": 0.7,
-          "leafClump": 4,
-          "leafSizeCm": 20
+          "leafClump": 3,
+          "leafSizeCm": 20,
+          "pliancy": 1
         }
       },
       {
@@ -3585,7 +3725,7 @@
           "trunkBaseRadiusRatio": 0.016,
           "trunkLengthRatio": 0.82,
           "trunkTipRatio": 0.1,
-          "trunkCurveV": 3,
+          "trunkCurveV": 6,
           "crownSpreadRatio": 0.439,
           "crownShape": "SPHERICAL",
           "ratioPower": 1.16,
@@ -3644,12 +3784,13 @@
           "phyllotaxis": "golden",
           "twigGnarl": 0.15,
           "kinkScale": 0.35,
-          "crownPeak": 0.5,
+          "crownPeak": 0.45,
           "twigStroke": 0.6,
           "trunkForkHeightRatio": 0.15,
           "trunkForkAsymmetry": 0.25,
           "leafClump": 4,
-          "leafSizeCm": 25
+          "leafSizeCm": 25,
+          "pliancy": 2
         }
       },
       {
@@ -3659,7 +3800,7 @@
           "trunkBaseRadiusRatio": 0.020800000000000003,
           "trunkLengthRatio": 0.84,
           "trunkTipRatio": 0.08690283681277414,
-          "trunkCurveV": 3.654858159361294,
+          "trunkCurveV": 20,
           "crownSpreadRatio": 0.55,
           "crownShape": "SPHERICAL",
           "ratioPower": 1.1716398231766214,
@@ -3718,12 +3859,13 @@
           "trunkFork": true,
           "trunkForkAngle": 35.53033327701121,
           "leafDensity": 11,
-          "crownPeak": 0.6249999999999999,
+          "crownPeak": 0.5,
           "twigStroke": 0.6,
           "trunkForkHeightRatio": 0.06,
           "trunkForkAsymmetry": -0.20000000000000018,
-          "leafClump": 4,
-          "leafSizeCm": 30
+          "leafClump": 5,
+          "leafSizeCm": 30,
+          "pliancy": 4
         }
       }
     ]
@@ -3982,6 +4124,405 @@
           "trunkForkMainAngleScale": 0.6,
           "trunkLeanScale": 0.4,
           "leafClump": 4
+        }
+      }
+    ]
+  },
+  {
+    "ref": "POPLAR",
+    "startSpecies": "POPLAR",
+    "form": "SINGLE",
+    "profile": {
+      "trunkHeightRatio": 0.0992,
+      "trunkBaseRadiusRatio": 0.00987,
+      "trunkLengthRatio": 0.94,
+      "trunkCurveV": 1.5,
+      "crownSpreadRatio": 0.1587,
+      "crownShape": "CYLINDRICAL",
+      "ratioPower": 1.2,
+      "levels": [
+        {
+          "downAngleV": 8,
+          "lengthV": 0.2,
+          "curve": 10,
+          "curveV": 4,
+          "curveRes": 4,
+          "tropism": 0.4,
+          "fork": 0,
+          "count": 31,
+          "downAngle": 26,
+          "lengthRatio": 1,
+          "kink": 5
+        },
+        {
+          "downAngleV": 10,
+          "lengthV": 0.2,
+          "curve": 0,
+          "curveV": 6,
+          "curveRes": 2,
+          "tropism": 0.4,
+          "fork": 0,
+          "count": 7,
+          "downAngle": 25,
+          "lengthRatio": 0.45,
+          "kink": 5
+        },
+        {
+          "downAngleV": 10,
+          "lengthV": 0.2,
+          "curve": 0,
+          "curveV": 8,
+          "curveRes": 2,
+          "tropism": 0.3,
+          "fork": 0,
+          "count": 4,
+          "downAngle": 25,
+          "lengthRatio": 0.45,
+          "kink": 5
+        }
+      ],
+      "jitterStrength": 0.05,
+      "flareFactor": 1.12,
+      "radialSegments": 4,
+      "leafSizeRatio": 0.0126,
+      "leafAspect": 0.7,
+      "leafDensity": 49,
+      "trunkKink": 0,
+      "tipSpurs": false,
+      "prune": true,
+      "outwardBias": 0.5,
+      "phyllotaxis": "golden",
+      "twigGnarl": 0.3,
+      "kinkScale": 0.4,
+      "leafShape": "quad",
+      "leafOutline": [
+        0,
+        0,
+        0.336,
+        1.145,
+        1.05,
+        0,
+        0.336,
+        -1.145
+      ],
+      "petioleLengthRatio": 0.3
+    },
+    "heightAnchors": [
+      {
+        "h": 6,
+        "profile": {
+          "trunkHeightRatio": 0.096,
+          "trunkBaseRadiusRatio": 0.00941,
+          "trunkLengthRatio": 1,
+          "trunkCurveV": 1.5,
+          "crownSpreadRatio": 0.1536,
+          "crownShape": "CYLINDRICAL",
+          "ratioPower": 1.2,
+          "levels": [
+            {
+              "downAngleV": 8,
+              "lengthV": 0.2,
+              "curve": 10,
+              "curveV": 4,
+              "curveRes": 4,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 27,
+              "downAngle": 26,
+              "lengthRatio": 1,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 6,
+              "curveRes": 2,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 6,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 8,
+              "curveRes": 2,
+              "tropism": 0.3,
+              "fork": 0,
+              "count": 4,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            }
+          ],
+          "jitterStrength": 0.05,
+          "flareFactor": 1.12,
+          "radialSegments": 4,
+          "leafSizeRatio": 0.0151,
+          "leafAspect": 0.7,
+          "leafDensity": 44,
+          "trunkKink": 0,
+          "tipSpurs": false,
+          "prune": true,
+          "outwardBias": 0.5,
+          "phyllotaxis": "golden",
+          "twigGnarl": 0.3,
+          "kinkScale": 0.4,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.336,
+            1.145,
+            1.05,
+            0,
+            0.336,
+            -1.145
+          ],
+          "petioleLengthRatio": 0.3
+        }
+      },
+      {
+        "h": 9,
+        "profile": {
+          "trunkHeightRatio": 0.0992,
+          "trunkBaseRadiusRatio": 0.00987,
+          "trunkLengthRatio": 0.94,
+          "trunkCurveV": 1.5,
+          "crownSpreadRatio": 0.1587,
+          "crownShape": "CYLINDRICAL",
+          "ratioPower": 1.2,
+          "levels": [
+            {
+              "downAngleV": 8,
+              "lengthV": 0.2,
+              "curve": 10,
+              "curveV": 4,
+              "curveRes": 4,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 31,
+              "downAngle": 26,
+              "lengthRatio": 1,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 6,
+              "curveRes": 2,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 7,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 8,
+              "curveRes": 2,
+              "tropism": 0.3,
+              "fork": 0,
+              "count": 4,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            }
+          ],
+          "jitterStrength": 0.05,
+          "flareFactor": 1.12,
+          "radialSegments": 4,
+          "leafSizeRatio": 0.0126,
+          "leafAspect": 0.7,
+          "leafDensity": 49,
+          "trunkKink": 0,
+          "tipSpurs": false,
+          "prune": true,
+          "outwardBias": 0.5,
+          "phyllotaxis": "golden",
+          "twigGnarl": 0.3,
+          "kinkScale": 0.4,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.336,
+            1.145,
+            1.05,
+            0,
+            0.336,
+            -1.145
+          ],
+          "petioleLengthRatio": 0.3
+        }
+      },
+      {
+        "h": 15,
+        "profile": {
+          "trunkHeightRatio": 0.1033,
+          "trunkBaseRadiusRatio": 0.0105,
+          "trunkLengthRatio": 0.86,
+          "trunkCurveV": 1.5,
+          "crownSpreadRatio": 0.1653,
+          "crownShape": "CYLINDRICAL",
+          "ratioPower": 1.2,
+          "levels": [
+            {
+              "downAngleV": 8,
+              "lengthV": 0.2,
+              "curve": 10,
+              "curveV": 4,
+              "curveRes": 4,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 37,
+              "downAngle": 26,
+              "lengthRatio": 1,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 6,
+              "curveRes": 2,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 8,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 8,
+              "curveRes": 2,
+              "tropism": 0.3,
+              "fork": 0,
+              "count": 4,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            }
+          ],
+          "jitterStrength": 0.05,
+          "flareFactor": 1.12,
+          "radialSegments": 4,
+          "leafSizeRatio": 0.01,
+          "leafAspect": 0.7,
+          "leafDensity": 55,
+          "trunkKink": 0,
+          "tipSpurs": false,
+          "prune": true,
+          "outwardBias": 0.5,
+          "phyllotaxis": "golden",
+          "twigGnarl": 0.3,
+          "kinkScale": 0.4,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.336,
+            1.145,
+            1.05,
+            0,
+            0.336,
+            -1.145
+          ],
+          "leafFlatness": 0.1,
+          "petioleLengthRatio": 0.3,
+          "petiolePliancy": 0.5,
+          "pliancy": 0
+        }
+      },
+      {
+        "h": 24,
+        "profile": {
+          "trunkHeightRatio": 0.1073,
+          "trunkBaseRadiusRatio": 0.01111,
+          "trunkLengthRatio": 0.8,
+          "trunkCurveV": 1.5,
+          "crownSpreadRatio": 0.1716,
+          "crownShape": "CYLINDRICAL",
+          "ratioPower": 1.2,
+          "levels": [
+            {
+              "downAngleV": 8,
+              "lengthV": 0.2,
+              "curve": 10,
+              "curveV": 4,
+              "curveRes": 4,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 43,
+              "downAngle": 26,
+              "lengthRatio": 1,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 6,
+              "curveRes": 2,
+              "tropism": 0.4,
+              "fork": 0,
+              "count": 9,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            },
+            {
+              "downAngleV": 10,
+              "lengthV": 0.2,
+              "curve": 0,
+              "curveV": 8,
+              "curveRes": 2,
+              "tropism": 0.3,
+              "fork": 0,
+              "count": 4,
+              "downAngle": 25,
+              "lengthRatio": 0.45,
+              "kink": 5
+            }
+          ],
+          "jitterStrength": 0.05,
+          "flareFactor": 1.12,
+          "radialSegments": 4,
+          "leafSizeRatio": 0.0081,
+          "leafAspect": 0.7,
+          "leafDensity": 62,
+          "trunkKink": 0,
+          "tipSpurs": false,
+          "prune": true,
+          "outwardBias": 0.5,
+          "phyllotaxis": "golden",
+          "twigGnarl": 0.3,
+          "kinkScale": 0.4,
+          "leafShape": "quad",
+          "leafOutline": [
+            0,
+            0,
+            0.336,
+            1.145,
+            1.05,
+            0,
+            0.336,
+            -1.145
+          ],
+          "petioleLengthRatio": 0.3,
+          "envelopeClipProbability": 0.7,
+          "crownPeak": 0.5
         }
       }
     ]

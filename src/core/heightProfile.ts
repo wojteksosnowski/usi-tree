@@ -9,7 +9,8 @@
  *
  * Bez three: moduł wolno importować poza leniwym widokiem 3D.
  */
-import type { SpeciesProfile } from './types.js';
+import { CROWN_SHAPE_PEAK } from './speciesProfiles.js';
+import type { BranchLevelParams, CrownShape, SpeciesProfile } from './types.js';
 
 export interface HeightAnchor {
   h: number;
@@ -37,6 +38,160 @@ const POSITIVE_RATIO_KEYS = new Set<string>([
   'crownSpreadRatio',
   'trunkHeightRatio',
 ]);
+
+function defaultBranchLevelParam(lvl: Partial<BranchLevelParams>, key: string): number | undefined {
+  switch (key) {
+    case 'count':
+      return 1;
+    case 'downAngle':
+      return 45;
+    case 'downAngleV':
+      return 10;
+    case 'lengthRatio':
+      return 0.5;
+    case 'lengthV':
+      return 0.2;
+    case 'curve':
+      return 0;
+    case 'curveV':
+      return 8;
+    case 'curveRes':
+      return 3;
+    case 'tropism':
+      return 0;
+    case 'downAngleSlope':
+      return 0;
+    case 'kink':
+      return 15;
+    case 'fork':
+      return 0;
+    case 'tipRatio':
+      return (typeof lvl.fork === 'number' ? lvl.fork : 0) > 0 ? 0.35 : 0.22;
+    case 'taper':
+      return 0;
+    case 'curveBack':
+      return typeof lvl.curve === 'number' ? lvl.curve : 0;
+    case 'baseSize':
+      return 0.1;
+    case 'rotate':
+      return 180 * (3 - Math.sqrt(5));
+    case 'rotateV':
+      return (0.25 * 180) / Math.PI;
+    default:
+      return undefined;
+  }
+}
+
+function defaultSpeciesParam(profile: Partial<SpeciesProfile>, key: string, heightM = 10): number | undefined {
+  switch (key) {
+    case 'trunkHeightRatio':
+      return 0.24;
+    case 'trunkBaseRadiusRatio':
+      return 0.012;
+    case 'trunkLengthRatio':
+      return 0.9;
+    case 'trunkTipRatio':
+      return 0.3;
+    case 'trunkTaper':
+      return 0;
+    case 'trunkCurveV':
+      return 3;
+    case 'crownSpreadRatio':
+      return 0.35;
+    case 'twigStroke':
+      return 1;
+    case 'crownPeak':
+      return (profile.crownShape ? CROWN_SHAPE_PEAK[profile.crownShape as CrownShape] : undefined) ?? 0.4;
+    case 'ratioPower':
+      return 1.2;
+    case 'jitterStrength':
+      return 0.06;
+    case 'flareFactor':
+      return 1.12;
+    case 'radialSegments':
+      return 4;
+    case 'leafSizeRatio':
+      return 0.015;
+    case 'leafSizeCm':
+      return typeof profile.leafSizeRatio === 'number'
+        ? Number((profile.leafSizeRatio * Math.max(0.5, heightM) * 100).toFixed(2))
+        : 15;
+    case 'leafAspect':
+      return 0.55;
+    case 'petioleLengthRatio':
+      return 0.15;
+    case 'petiolePliancy':
+      return 0;
+    case 'leafFlatness':
+      return 0;
+    case 'leafClump':
+      return 4;
+    case 'leafDensity':
+      return 38;
+    case 'envelopeScale':
+      return 1.0;
+    case 'envelopeClipProbability':
+      return 0.72;
+    case 'trunkKink':
+      return 3;
+    case 'scaffoldLimbs':
+      return 0;
+    case 'trunkForkAngle':
+      return 20;
+    case 'trunkForkCount':
+      return 2;
+    case 'trunkForkAsymmetry':
+      return 0;
+    case 'trunkForkHeightRatio':
+      return typeof profile.trunkHeightRatio === 'number' ? Math.min(profile.trunkHeightRatio * 0.9, 0.265) : 0.24;
+    case 'trunkForkSideLength':
+      return 1;
+    case 'trunkForkSideRadius':
+      return 1;
+    case 'trunkForkMainAngleScale':
+      return 1;
+    case 'trunkLeanScale':
+      return 1;
+    case 'crownAsymmetry':
+      return 0;
+    case 'trunkForkTropism':
+      return 2.2;
+    case 'limbBreakProbability':
+      return 0;
+    case 'outwardBias':
+      return 0.5;
+    case 'twigGnarl':
+      return 1;
+    case 'kinkScale':
+      return 1;
+    case 'pliancy':
+      return 0;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Zwraca jawną wartość liczbową parametru z profilu (lub rzędu gałęzi `levelIdx`),
+ * a gdy pole jest pominięte (`undefined`) — kanoniczną wartość domyślną silnika.
+ */
+export function resolveNumericParam(
+  profile: SpeciesProfile,
+  levelIdx: number | null,
+  key: string,
+  heightM = 10
+): number | undefined {
+  if (levelIdx !== null) {
+    const lvl = profile.levels?.[levelIdx];
+    if (!lvl) return undefined;
+    const raw = (lvl as unknown as Record<string, unknown>)[key];
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+    return defaultBranchLevelParam(lvl, key);
+  }
+  const raw = (profile as unknown as Record<string, unknown>)[key];
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  return defaultSpeciesParam(profile, key, heightM);
+}
 
 function ols(xs: number[], ys: number[]): { a: number; b: number } {
   const n = xs.length;
@@ -140,7 +295,11 @@ function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number,
     const pts = (nodes as number[]).map((y, i) => ({ h: hs[i], y }));
     let v = fitParameterCurve(pts).eval(h);
     if (key === 'leafSizeRatio') v = Math.max(0.003, v);
+    else if (key === 'trunkHeightRatio') v = Math.min(0.72, Math.max(1e-4, v));
+    else if (key === 'crownPeak') v = Math.min(0.95, Math.max(0.05, v));
+    else if (key === 'envelopeClipProbability') v = Math.min(1, Math.max(0, v));
     else if (POSITIVE_RATIO_KEYS.has(key)) v = Math.max(1e-4, v);
+    else if (key === 'taper' || key === 'trunkTaper') v = Math.max(0, v);
     if (INTEGER_KEYS.has(key)) {
       const minInt = key === 'leafClump' ? 0 : 1;
       return Math.max(minInt, Math.round(v));
@@ -168,6 +327,18 @@ function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number,
     for (const k of allKeys) {
       if (objs.every((o) => k in o && o[k] !== undefined)) {
         out[k] = evalAtNodes(objs.map((o) => o[k]), hs, h, nearIdx, k);
+      } else if (objs.some((o) => typeof o[k] === 'number')) {
+        const filled = objs.map((o, idx) =>
+          typeof o[k] === 'number'
+            ? (o[k] as number)
+            : (defaultBranchLevelParam(o as Partial<BranchLevelParams>, k) ??
+               defaultSpeciesParam(o as Partial<SpeciesProfile>, k, hs[idx]))
+        );
+        if (filled.every((v): v is number => typeof v === 'number')) {
+          out[k] = evalAtNodes(filled, hs, h, nearIdx, k);
+        } else if (k in objs[nearIdx] && objs[nearIdx][k] !== undefined) {
+          out[k] = structuredClone(objs[nearIdx][k]);
+        }
       } else if (k in objs[nearIdx] && objs[nearIdx][k] !== undefined) {
         out[k] = structuredClone(objs[nearIdx][k]);
       }

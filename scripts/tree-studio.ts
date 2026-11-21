@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
+import { SPECIES_PROFILES as BASE_PROFILES } from '../src/core/speciesProfiles';
+import { treeKindParams as baseKindParams } from '../src/core/treeSpeciesRegistry';
 
 const PORT = Number(process.env.PORT ?? 4173);
 const HOST = '127.0.0.1';
@@ -34,6 +36,7 @@ import {
 import {
   fitParameterCurve,
   profileAtHeight,
+  resolveNumericParam,
   scaleProfileByHeight,
 } from '${path.resolve('src/core/heightProfile').replace(/\\\\/g, '/')}';
 import { CrownEnvelope, crownRatio } from '${path.resolve('src/core/crownEnvelope').replace(/\\\\/g, '/')}';
@@ -292,15 +295,10 @@ function updateLeafPreview(profile: SpeciesProfile, species: string) {
 
 let lastChartTarget: { sectionTitle: string; label: string } = { sectionTitle: 'Pień i korona', label: 'trunkHeightRatio' };
 
-function getParamValue(p: SpeciesProfile, sectionTitle: string, label: string): number | undefined {
+function getParamValue(p: SpeciesProfile, sectionTitle: string, label: string, heightM = currentHeight): number | undefined {
   const m = sectionTitle.match(/L(\d+)/);
-  if (m) {
-    const idx = parseInt(m[1], 10) - 1;
-    const val = (p.levels?.[idx] as any)?.[label];
-    return typeof val === 'number' ? val : undefined;
-  }
-  const val = (p as any)[label];
-  return typeof val === 'number' ? val : undefined;
+  const levelIdx = m ? parseInt(m[1], 10) - 1 : null;
+  return resolveNumericParam(p, levelIdx, label, heightM);
 }
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {
@@ -312,7 +310,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   trunkBaseRadiusRatio: 'Promień pnia u podstawy względem wysokości drzewa.',
   trunkLengthRatio: 'Długość przewodnika (pnia głównego) względem wysokości drzewa.',
   trunkTipRatio: 'Stosunek promienia czubka pnia do promienia u podstawy.',
-  trunkTaper: 'Współczynnik zwężania grubości pnia na sekcję (0.0 = brak zwężania, 1.0 = silne zwężanie).',
+  trunkTaper: 'Zwężanie wykładnicze pnia, ubytek całkowity: czubek = r0·(1 − x), np. 0.5 = czubek o połowę cieńszy (0 = wyłączone, działa trunkTipRatio).',
   taper: 'Współczynnik zwężania grubości gałęzi na sekcję (0.0–1.0).',
   trunkCurveV: 'Losowe wygięcie/krzywizna pnia głównego (stopnie).',
   ratioPower: 'Wykładnik reguły rur: jak szybko zwężają się gałęzie potomne względem rodzica.',
@@ -349,7 +347,7 @@ function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle:
   const pts: { h: number; y: number }[] = [];
   for (const h of heights) {
     const prof = map.get(h)!;
-    const y = getParamValue(prof, sectionTitle, label);
+    const y = getParamValue(prof, sectionTitle, label, h);
     if (y !== undefined) pts.push({ h, y });
   }
   if (pts.length === 0) {
@@ -713,18 +711,22 @@ function buildParamInputs() {
         if (f.min !== undefined) inp.min = String(f.min);
         if (f.max !== undefined) inp.max = String(f.max);
         inp.onfocus = () => updateInlineChart(title, f.label);
-        inp.oninput = () => {
+        const handleNumberChange = () => {
           const n = parseFloat(inp.value);
           if (!Number.isNaN(n)) {
+            lastChartTarget = { sectionTitle: title, label: f.label };
             f.onChange(n);
             syncDirty(n);
             updateInlineChart(title, f.label);
           }
         };
+        inp.oninput = handleNumberChange;
+        inp.onchange = handleNumberChange;
         resetBtn.onclick = (e) => {
           e.preventDefault();
           if (baseVal !== undefined) {
             inp.value = String(baseVal);
+            lastChartTarget = { sectionTitle: title, label: f.label };
             f.onChange(baseVal);
             syncDirty(baseVal);
             updateInlineChart(title, f.label);
@@ -743,12 +745,12 @@ function buildParamInputs() {
     { label: 'crownShape', type: 'select', value: profile.crownShape, options: CROWN_SHAPES, onChange: (v) => updateField((p, x) => (p.crownShape = x), v) },
     { label: 'envelopeClipProbability', type: 'number', step: 0.05, min: 0, max: 1, value: profile.envelopeClipProbability ?? 0.72, onChange: (v) => updateField((p, x) => (p.envelopeClipProbability = x), v) },
     { label: 'crownSpreadRatio', type: 'number', step: 0.01, min: 0.05, max: 1.5, value: profile.crownSpreadRatio, onChange: (v) => updateField((p, x) => (p.crownSpreadRatio = x), v) },
-    { label: 'crownPeak', type: 'number', step: 0.05, min: 0.05, max: 0.95, value: profile.crownPeak ?? 0.4, onChange: (v) => updateField((p, x) => (p.crownPeak = x), v) },
+    { label: 'crownPeak', type: 'number', step: 0.05, min: 0.05, max: 0.95, value: resolveNumericParam(profile, null, 'crownPeak') ?? 0.4, onChange: (v) => updateField((p, x) => (p.crownPeak = x), v) },
     { label: 'trunkHeightRatio', type: 'number', step: 0.01, min: 0.02, max: 0.9, value: profile.trunkHeightRatio, onChange: (v) => updateField((p, x) => (p.trunkHeightRatio = x), v) },
     { label: 'trunkBaseRadiusRatio', type: 'number', step: 0.001, min: 0.002, max: 0.05, value: profile.trunkBaseRadiusRatio, onChange: (v) => updateField((p, x) => (p.trunkBaseRadiusRatio = x), v) },
     { label: 'trunkLengthRatio', type: 'number', step: 0.02, min: 0.2, max: 1.0, value: profile.trunkLengthRatio, onChange: (v) => updateField((p, x) => (p.trunkLengthRatio = x), v) },
-    { label: 'trunkTipRatio', type: 'number', step: 0.01, min: 0.01, max: 0.5, value: profile.trunkTipRatio ?? 0.1, onChange: (v) => updateField((p, x) => (p.trunkTipRatio = x), v) },
-    { label: 'trunkTaper', type: 'number', step: 0.05, min: 0, max: 1, value: profile.trunkTaper ?? 0.15, onChange: (v) => updateField((p, x) => (p.trunkTaper = x), v) },
+    { label: 'trunkTipRatio', type: 'number', step: 0.01, min: 0.01, max: 0.5, value: resolveNumericParam(profile, null, 'trunkTipRatio') ?? 0.3, onChange: (v) => updateField((p, x) => (p.trunkTipRatio = x), v) },
+    { label: 'trunkTaper', type: 'number', step: 0.05, min: 0, max: 0.95, value: profile.trunkTaper ?? 0, onChange: (v) => updateField((p, x) => { if (x > 0) p.trunkTaper = x; else delete p.trunkTaper; }, v) },
     { label: 'trunkCurveV', type: 'number', step: 0.5, min: 0, max: 30, value: profile.trunkCurveV, onChange: (v) => updateField((p, x) => (p.trunkCurveV = x), v) },
     { label: 'ratioPower', type: 'number', step: 0.05, min: 0.5, max: 2.5, value: profile.ratioPower, onChange: (v) => updateField((p, x) => (p.ratioPower = x), v) },
     { label: 'flareFactor', type: 'number', step: 0.02, min: 1.0, max: 2.0, value: profile.flareFactor, onChange: (v) => updateField((p, x) => (p.flareFactor = x), v) },
@@ -801,8 +803,8 @@ function buildParamInputs() {
       { label: 'curveV', type: 'number', step: 2, min: 0, max: 45, value: lvl.curveV, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].curveV = x; }, v) },
       { label: 'tropism', type: 'number', step: 0.05, min: -3, max: 1, value: lvl.tropism, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tropism = x; }, v) },
       { label: 'fork', type: 'number', step: 1, min: 0, max: 60, value: lvl.fork, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].fork = x; }, v) },
-      { label: 'taper', type: 'number', step: 0.05, min: 0, max: 1, value: lvl.taper ?? 0.2, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].taper = x; }, v) },
-      { label: 'tipRatio', type: 'number', step: 0.02, min: 0.05, max: 1, value: lvl.tipRatio ?? 0.25, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tipRatio = x; }, v) },
+      { label: 'taper', type: 'number', step: 0.05, min: 0, max: 0.95, value: lvl.taper ?? 0, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) { if (x > 0) p.levels[idx].taper = x; else delete p.levels[idx].taper; } }, v) },
+      { label: 'tipRatio', type: 'number', step: 0.02, min: 0.05, max: 1, value: resolveNumericParam(profile, idx, 'tipRatio') ?? 0.22, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tipRatio = x; }, v) },
     ]);
   });
 }
@@ -946,8 +948,19 @@ function initEvents() {
     const data = await res.json();
     if (data.ok) {
       const fitted = FITTED_PROFILES.find((f) => f.ref === currentKind);
+      const savedAnchors = anchors.map((a) => ({ h: a.h, profile: structuredClone(a.profile) }));
       if (fitted) {
-        fitted.heightAnchors = anchors.map((a) => ({ h: a.h, profile: structuredClone(a.profile) }));
+        fitted.heightAnchors = savedAnchors;
+      } else {
+        // Nowy wpis gatunku bazowego (serwer utworzył go w fittedProfiles.json)
+        const ref10 = [...savedAnchors].sort((a, b) => Math.abs(a.h - 10) - Math.abs(b.h - 10))[0];
+        (FITTED_PROFILES as any[]).push({
+          ref: currentKind,
+          startSpecies: currentKind,
+          form: currentForm,
+          profile: structuredClone(ref10.profile),
+          heightAnchors: savedAnchors,
+        });
       }
       updateInlineChart();
       showToast('Zapisano drzewo ' + currentKind + ' (' + anchors.length + ' węzłów)');
@@ -1162,17 +1175,48 @@ async function main() {
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         try {
-          const { kind, height, profile } = JSON.parse(body);
-          // Bez tego JSON.stringify zapisze węzeł `{}` (h i profile undefined) i zepsuje heightAnchors
-          if (typeof height !== 'number' || !Number.isFinite(height)) throw new Error('Brak poprawnej wysokości węzła (height)');
-          if (!profile || typeof profile !== 'object' || !Array.isArray(profile.levels)) throw new Error('Brak poprawnego profilu (profile.levels)');
+          const { kind, height, profile, anchors } = JSON.parse(body);
+          // Bez walidacji JSON.stringify zapisze węzeł `{}` (h i profile undefined) i zepsuje heightAnchors
+          const checkAnchor = (h: unknown, p: any) => {
+            if (typeof h !== 'number' || !Number.isFinite(h)) throw new Error('Brak poprawnej wysokości węzła (height)');
+            if (!p || typeof p !== 'object' || !Array.isArray(p.levels)) throw new Error(`Brak poprawnego profilu (profile.levels) dla h=${h}`);
+          };
           const fitted = JSON.parse(fs.readFileSync(FITTED_PATH, 'utf-8'));
-          const entry = fitted.find((f: any) => f.ref === kind);
-          if (!entry) throw new Error(`Gatunek "${kind}" nie ma wpisu w fittedProfiles.json`);
-          if (!entry.heightAnchors) entry.heightAnchors = [];
-          const idx = entry.heightAnchors.findIndex((a: any) => a.h === height);
-          if (idx >= 0) entry.heightAnchors[idx].profile = profile;
-          else entry.heightAnchors.push({ h: height, profile });
+          let entry = fitted.find((f: any) => f.ref === kind);
+          if (!entry) {
+            // Gatunek bazowy bez wpisu (np. POPLAR): tworzymy wpis jak dla BIRCH/PINE
+            if (typeof kind !== 'string' || !(kind in BASE_PROFILES)) {
+              throw new Error(`Gatunek "${kind}" nie ma wpisu w fittedProfiles.json ani w gatunkach bazowych`);
+            }
+            const saved: { h: number; profile: any }[] = Array.isArray(anchors)
+              ? anchors.map((a: any) => ({ h: a?.h, profile: a?.profile }))
+              : [{ h: height, profile }];
+            const ref10 = saved
+              .filter((a) => typeof a.h === 'number' && a.profile)
+              .sort((a, b) => Math.abs(a.h - 10) - Math.abs(b.h - 10))[0];
+            if (!ref10) throw new Error('Brak poprawnej wysokości węzła (height)');
+            entry = {
+              ref: kind,
+              startSpecies: kind,
+              form: baseKindParams(kind as any).form,
+              profile: structuredClone(ref10.profile),
+              heightAnchors: [],
+            };
+            fitted.push(entry);
+          }
+          if (Array.isArray(anchors)) {
+            // Format Studio: pełny zestaw węzłów zastępuje heightAnchors gatunku
+            if (anchors.length === 0) throw new Error('Brak węzłów wysokości do zapisania (anchors)');
+            for (const a of anchors) checkAnchor(a?.h, a?.profile);
+            entry.heightAnchors = anchors.map((a: any) => ({ h: a.h, profile: a.profile }));
+          } else {
+            // Format pojedynczego węzła: { height, profile }
+            checkAnchor(height, profile);
+            if (!entry.heightAnchors) entry.heightAnchors = [];
+            const idx = entry.heightAnchors.findIndex((a: any) => a.h === height);
+            if (idx >= 0) entry.heightAnchors[idx].profile = profile;
+            else entry.heightAnchors.push({ h: height, profile });
+          }
           entry.heightAnchors.sort((a: any, b: any) => a.h - b.h);
           fs.writeFileSync(FITTED_PATH, JSON.stringify(fitted, null, 2) + '\n');
           resHttp.writeHead(200, { 'Content-Type': 'application/json' });

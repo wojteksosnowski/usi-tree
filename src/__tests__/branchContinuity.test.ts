@@ -132,3 +132,42 @@ describe('Branch & Trunk Continuity (H1, H2, H3)', () => {
     }
   });
 });
+
+describe('trunkTaper: zwężanie wykładnicze po długości pnia, niezależne od liczby konarów', () => {
+  const radiusAtHalf = (s: { px: number[]; py: number[]; pz: number[]; r: number[] }) => {
+    const d = [0];
+    for (let i = 1; i < s.px.length; i++) {
+      d.push(d[i - 1] + Math.hypot(s.px[i] - s.px[i - 1], s.py[i] - s.py[i - 1], s.pz[i] - s.pz[i - 1]));
+    }
+    const half = d[d.length - 1] / 2;
+    const i = d.findIndex((x) => x >= half);
+    const f = (half - d[i - 1]) / (d[i] - d[i - 1] || 1);
+    return s.r[i - 1] + (s.r[i] - s.r[i - 1]) * f;
+  };
+
+  for (const kind of ['PINE', 'OAK'] as TreeKind[]) {
+    it(`${kind}: trunkTaper 0.5 (ubytek całkowity) daje r(½) ≈ r0·0.5^0.5 przy 1 i pełnej liczbie poziomów gałęzi`, () => {
+      const params = treeKindParams(kind, 15);
+      const results: number[] = [];
+      for (const levels of [params.profile!.levels.slice(0, 1), params.profile!.levels]) {
+        const skel = TreeGenerator.buildSkeleton({
+          ...params,
+          profile: { ...params.profile!, trunkTaper: 0.5, levels },
+          height: 15,
+          seed: 42,
+          form: 'SINGLE',
+        });
+        const trunk = skel.stems.find((s) => s.level === 0)!;
+        for (let i = 0; i < trunk.r.length - 1; i++) {
+          expect(trunk.r[i + 1]).toBeLessThanOrEqual(trunk.r[i] + 1e-9);
+          expect(trunk.r[i + 1] / trunk.r[i]).toBeGreaterThanOrEqual(0.78);
+        }
+        const ratio = radiusAtHalf(trunk) / trunk.r[0];
+        results.push(ratio);
+        expect(ratio).toBeGreaterThan(Math.pow(0.5, 0.5) * 0.8);
+        expect(ratio).toBeLessThan(Math.pow(0.5, 0.5) * 1.2);
+      }
+      expect(Math.abs(results[0] - results[1])).toBeLessThan(0.08);
+    }, 30000);
+  }
+});

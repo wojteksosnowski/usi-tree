@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import FITTED from '../core/fittedProfiles.json' with { type: 'json' };
 import { TreeGenerator, type SpeciesProfile, type TreeSpecies } from '../core/TreeGenerator.js';
-import { fitParameterCurve, heightClassM, profileAtHeight, scaleProfileByHeight, type HeightAnchor } from '../core/heightProfile.js';
+import {
+  fitParameterCurve,
+  heightClassM,
+  profileAtHeight,
+  resolveNumericParam,
+  scaleProfileByHeight,
+  type HeightAnchor,
+} from '../core/heightProfile.js';
 import { describeTreeKindModelSource, treeKindParams } from '../core/treeSpeciesRegistry.js';
 import { SPECIES_PROFILES } from '../core/speciesProfiles.js';
 
@@ -9,25 +16,72 @@ const entries = (FITTED as unknown as { ref: string; startSpecies: TreeSpecies; 
 
 describe('profil zależny od wysokości', () => {
   it('wybrane gatunki mają węzły wysokości', () => {
-    expect(entries.map((e) => e.ref).sort()).toEqual([
-      'ASH',
-      'BIRCH',
-      'Black Poplar',
-      'Elm',
-      'Horsechestnut',
-      'Linden',
-      'PINE',
-      'Plane',
-      'Quaking Aspen',
-      'Sycamore',
-    ]);
+    expect(entries.map((e) => e.ref).sort()).toEqual(
+      expect.arrayContaining([
+        'ASH',
+        'BIRCH',
+        'Black Poplar',
+        'Elm',
+        'Horsechestnut',
+        'Linden',
+        'PINE',
+        'Plane',
+        'Quaking Aspen',
+        'Sycamore',
+      ])
+    );
   });
 
-  it('węzły jednego rodzaju mają ten sam zestaw pól (pole w części węzłów przeskakuje skokowo w połowie odstępu)', () => {
+  it('opcjonalne pola liczbowe zdefiniowane w części węzłów są uzupełniane wartością domyślną i płynnie interpolowane (bez skoku w połowie odstępu)', () => {
     for (const e of entries) {
-      const keys = e.heightAnchors!.map((a) => Object.keys(a.profile).sort().join(','));
-      expect(new Set(keys).size, e.ref).toBe(1);
+      const anchors = e.heightAnchors!;
+      const allKeys = new Set<string>();
+      for (const a of anchors) for (const k of Object.keys(a.profile)) allKeys.add(k);
+      for (const k of allKeys) {
+        if (anchors.some((a) => typeof (a.profile as unknown as Record<string, unknown>)[k] === 'number')) {
+          for (const a of anchors) {
+            expect(typeof resolveNumericParam(a.profile, null, k, a.h), `${e.ref}.${k}@${a.h}`).toBe('number');
+          }
+        }
+      }
     }
+
+    const base = SPECIES_PROFILES.BIRCH;
+    const anchors4: HeightAnchor[] = [
+      { h: 6, profile: structuredClone(base) },
+      { h: 9, profile: structuredClone(base) },
+      { h: 15, profile: { ...structuredClone(base), pliancy: 20 } },
+      { h: 24, profile: { ...structuredClone(base), pliancy: 38 } },
+    ];
+    delete anchors4[0].profile.pliancy;
+    delete anchors4[1].profile.pliancy;
+    // Węzły 6 i 9 m mają domyślne pliancy = 0; w h = 12 m interpolacja krzywej daje płynną wartość pośrednią (0 < pliancy < 20)
+    const p12 = profileAtHeight(anchors4, 12);
+    expect(p12.pliancy).toBeDefined();
+    expect(p12.pliancy!).toBeGreaterThan(2);
+    expect(p12.pliancy!).toBeLessThan(18);
+
+    // Opcjonalne parametry rzędu gałęzi (tipRatio, taper) ustawione tylko w jednym węźle
+    const a6 = structuredClone(base);
+    const a24 = structuredClone(base);
+    delete a6.levels[0].tipRatio;
+    delete a6.levels[0].taper;
+    a24.levels[0].tipRatio = 0.62;
+    a24.levels[0].taper = 0.4;
+    const mid15 = profileAtHeight(
+      [
+        { h: 6, profile: a6 },
+        { h: 24, profile: a24 },
+      ],
+      15
+    );
+    // 2 węzły -> liniowo w połowie między kanonicznym domyślnym (tipRatio=0.22, taper=0) a (0.62, 0.4)
+    expect(mid15.levels[0].tipRatio).toBeCloseTo((0.22 + 0.62) / 2, 4);
+    expect(mid15.levels[0].taper).toBeCloseTo(0.2, 4);
+
+    // 1 wartość / stałe wartości -> const
+    expect(fitParameterCurve([{ h: 10, y: 5 }]).kind).toBe('const');
+    expect(fitParameterCurve([{ h: 6, y: 5 }, { h: 15, y: 5 }, { h: 24, y: 5 }]).kind).toBe('const');
   });
 
   it('w węzłach zwraca dokładnie strojony profil, poniżej najniższego — najniższy', () => {

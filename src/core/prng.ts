@@ -49,6 +49,22 @@ export function stemHash(ox: number, oy: number, oz: number, level: number): num
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+/** Deterministyczne ziarno potomne ze ścieżki topologicznej (rodzic × indeks slotu × sól) */
+export function childSeed(parentSeed: number, slot: number, salt = 0): number {
+  let h = (parentSeed ^ Math.imul(slot + 1, 0x9e3779b1) ^ Math.imul(salt + 1, 0x85ebca77)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) || 0x12345678;
+}
+
+/** Deterministyczna liczba zmiennoprzecinkowa [0, 1) z ziarna ścieżki topologicznej i soli */
+export function seedFloat(seed: number, salt = 0): number {
+  let h = (seed ^ Math.imul(salt + 1, 0x9e3779b9)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 /** Stabilny 32-bitowy hash FNV-1a łańcucha znaków. */
 export function hashString(str: string): number {
   let hash = 2166136261;

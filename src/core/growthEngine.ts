@@ -3,7 +3,7 @@
  * Fully re-entrant and instance-encapsulated (zero static mutable state).
  */
 import { CrownEnvelope, GROUND_CLEARANCE, crownRatio } from './crownEnvelope.js';
-import { FastPrng, stemHash } from './prng.js';
+import { FastPrng, childSeed, seedFloat } from './prng.js';
 import type {
   BranchLevelParams,
   SpeciesProfile,
@@ -47,10 +47,12 @@ export class GrowthContext {
     this.leaderTropism = 2.2;
     const L = profile.trunkLengthRatio;
     const R0 = profile.trunkBaseRadiusRatio;
+    const rootSeed = ((prng.next() * 4294967296) >>> 0) || 0x12345678;
+    const rootPrng = new FastPrng(childSeed(rootSeed, 0, 0));
 
     if (form === 'MULTI') {
-      const n = 3 + Math.floor(prng.next() * 3);
-      this.growLeaders(n, 0, R0, 16, 12, L * 0.72, L * 0.2, profile, prng, out);
+      const n = 3 + Math.floor(rootPrng.next() * 3);
+      this.growLeaders(n, 0, R0, 16, 12, L * 0.72, L * 0.2, profile, rootSeed, out);
     } else if (form === 'SINGLE' && profile.scaffoldLimbs) {
       const baseY = profile.trunkHeightRatio;
       const baseSegs = 6;
@@ -70,7 +72,7 @@ export class GrowthContext {
         length: baseY,
         clipped: false,
       });
-      const n = profile.scaffoldLimbs + (prng.next() < 0.5 ? 0 : 1);
+      const n = profile.scaffoldLimbs + (rootPrng.next() < 0.5 ? 0 : 1);
       this.leaderTropism = 0.5;
       this.growLeaders(
         n,
@@ -81,14 +83,14 @@ export class GrowthContext {
         (1 - baseY) * 0.85,
         (1 - baseY) * 0.25,
         profile,
-        prng,
+        rootSeed,
         out
       );
     } else if (form === 'FORKED') {
-      const forkYRand = Math.min(profile.trunkHeightRatio * 0.9, 0.18 + prng.next() * 0.17);
+      const forkYRand = Math.min(profile.trunkHeightRatio * 0.9, 0.18 + rootPrng.next() * 0.17);
       const forkY = profile.trunkForkHeightRatio ?? forkYRand;
-      const az0 = prng.range(0, Math.PI * 2);
-      const lean = (2 + prng.next() * 3) * DEG * (profile.trunkLeanScale ?? 1);
+      const az0 = rootPrng.range(0, Math.PI * 2);
+      const lean = (2 + rootPrng.next() * 3) * DEG * (profile.trunkLeanScale ?? 1);
       const tx = Math.sin(lean) * Math.cos(az0);
       const tz = Math.sin(lean) * Math.sin(az0);
       const ty = Math.cos(lean);
@@ -122,7 +124,7 @@ export class GrowthContext {
       if (profile.trunkForkTropism !== undefined) {
         this.leaderTropism = profile.trunkForkTropism;
       }
-      const spread = (profile.trunkForkAngle ?? 32) * (0.85 + prng.next() * 0.3);
+      const spread = (profile.trunkForkAngle ?? 32) * (0.85 + rootPrng.next() * 0.3);
       const leaders = [
         {
           az: az0 + Math.PI,
@@ -131,19 +133,21 @@ export class GrowthContext {
           r: rMain,
         },
         {
-          az: az0 + prng.signedRange(0.5),
+          az: az0 + rootPrng.signedRange(0.5),
           angle: spread * (0.7 + 0.3 * asym),
           len:
-            (0.85 + prng.next() * 0.1) *
+            (0.85 + rootPrng.next() * 0.1) *
             (1 - 0.3 * asym) *
             (profile.trunkForkSideLength ?? 1),
           r: rSide,
         },
       ];
       const embedY = Math.max(0, forkY - rTopFork * 0.4);
-      for (const ld of leaders) {
+      for (let li = 0; li < leaders.length; li++) {
+        const ld = leaders[li];
         this.splitDir(tx, ty, tz, ld.az, ld.angle * DEG);
         const [dx, dy, dz] = this.tmp;
+        const leaderSeed = childSeed(rootSeed, li, 10);
         this.growBranch(
           0,
           tx * embedY,
@@ -155,12 +159,14 @@ export class GrowthContext {
           (L - forkY) * ld.len,
           ld.r,
           profile,
-          prng,
-          out
+          new FastPrng(leaderSeed),
+          out,
+          leaderSeed
         );
       }
     } else {
-      this.growBranch(0, 0, 0, 0, 0, 1, 0, L, R0, profile, prng, out);
+      const trunkSeed = childSeed(rootSeed, 0, 10);
+      this.growBranch(0, 0, 0, 0, 0, 1, 0, L, R0, profile, new FastPrng(trunkSeed), out, trunkSeed);
     }
 
     for (const s of out) {
@@ -184,14 +190,17 @@ export class GrowthContext {
     len0: number,
     lenV: number,
     profile: SpeciesProfile,
-    prng: FastPrng,
+    rootSeed: number,
     out: Stem[]
   ) {
     this.trunkCountScale = Math.pow(n, -0.55);
-    const az0 = prng.range(0, Math.PI * 2);
+    const basePrng = new FastPrng(childSeed(rootSeed, 0, 11));
+    const az0 = basePrng.range(0, Math.PI * 2);
     for (let i = 0; i < n; i++) {
-      const lean = (lean0 + prng.next() * leanV) * DEG;
-      const az = az0 + (i / n) * Math.PI * 2 + prng.signedRange(0.4);
+      const leaderSeed = childSeed(rootSeed, i, 12);
+      const lPrng = new FastPrng(leaderSeed);
+      const lean = (lean0 + lPrng.next() * leanV) * DEG;
+      const az = az0 + (i / n) * Math.PI * 2 + lPrng.signedRange(0.4);
       const dx = Math.sin(lean) * Math.cos(az);
       const dz = Math.sin(lean) * Math.sin(az);
       const dy = Math.cos(lean);
@@ -204,11 +213,12 @@ export class GrowthContext {
         dx,
         dy,
         dz,
-        len0 + prng.next() * lenV,
+        len0 + lPrng.next() * lenV,
         r * Math.pow(n, -0.5) * 1.1,
         profile,
-        prng,
-        out
+        new FastPrng(leaderSeed),
+        out,
+        leaderSeed
       );
     }
   }
@@ -225,8 +235,11 @@ export class GrowthContext {
     r0: number,
     profile: SpeciesProfile,
     prng: FastPrng,
-    out: Stem[]
+    out: Stem[],
+    branchSeed?: number
   ) {
+    const bSeed = branchSeed ?? (((prng.next() * 4294967296) >>> 0) || 0x12345678);
+    const nominalLength = length;
     const isTrunk = level === 0;
     const p: BranchLevelParams = isTrunk
       ? {
@@ -251,7 +264,7 @@ export class GrowthContext {
       !isTrunk &&
       level >= deepest - 1 &&
       clipProb < 1.0 &&
-      stemHash(ox, oy, oz, level) >= clipProb;
+      seedFloat(bSeed, 5) >= clipProb;
 
     this.groundClearance =
       profile.prune && !isTrunk && oy > GROUND_CLEARANCE ? GROUND_CLEARANCE : -Infinity;
@@ -269,7 +282,7 @@ export class GrowthContext {
         length,
         p,
         this.stemTropism(p, r0),
-        isTrunk ? 0 : this.stemSag(profile, length, r0),
+        0,
         bypassRadial
       );
       if (f0 < 1) {
@@ -287,7 +300,7 @@ export class GrowthContext {
             length,
             p,
             this.stemTropism(p, r1),
-            isTrunk ? 0 : this.stemSag(profile, length, r1),
+            0,
             bypassRadial
           )
         );
@@ -301,13 +314,22 @@ export class GrowthContext {
 
     let breakT = Infinity;
     if (level === 1 && profile.limbBreakProbability) {
-      const hb = stemHash(oz, ox, oy, 7);
+      const hb = seedFloat(bSeed, 7);
       if (hb < profile.limbBreakProbability) {
         breakT = 0.35 + 0.35 * (hb / profile.limbBreakProbability);
       }
     }
 
-    const plan: { t: number; az: number; len: number; down: number; reach?: boolean }[] = [];
+    const plan: {
+      slot: number;
+      t: number;
+      az: number;
+      len: number;
+      down: number;
+      kinkRoll: number;
+      reachRoll: number;
+      reach?: boolean;
+    }[] = [];
     if (cp) {
       const base = isTrunk
         ? Math.max(0.03, (profile.trunkHeightRatio - oy) / Math.max(1e-6, length))
@@ -318,41 +340,48 @@ export class GrowthContext {
             1,
             Math.round(
               cp.count *
-                (0.25 + 0.75 * Math.min(1, length / this.levelRefLength(profile, level)))
+                (0.25 + 0.75 * Math.min(1, nominalLength / this.levelRefLength(profile, level)))
             )
           );
       const golden = profile.phyllotaxis === 'golden';
       const rot = cp.rotate !== undefined ? cp.rotate * DEG : golden ? GOLDEN_ANGLE : null;
       const rotJitter = cp.rotateV !== undefined ? cp.rotateV * DEG : GOLDEN_JITTER;
-      const slots = rot !== null ? null : this.shuffledSlots(count, prng);
-      const azOffset = prng.next();
+      const slotsPrng = new FastPrng(childSeed(bSeed, 0, 2));
+      const slots = rot !== null ? null : this.shuffledSlots(count, slotsPrng);
+      const azOffset = slotsPrng.next();
       for (let i = 0; i < count; i++) {
+        const planPrng = new FastPrng(childSeed(bSeed, i, 1));
         const t = Math.min(
           0.97,
-          base + ((1 - base) * (i + 0.15 + prng.next() * 0.7)) / count
+          base + ((1 - base) * (i + 0.15 + planPrng.next() * 0.7)) / count
         );
         const az = slots
-          ? 2 * Math.PI * (azOffset + (slots[i] + prng.signedRange(0.4)) / count)
-          : 2 * Math.PI * azOffset + i * rot! + prng.signedRange(rotJitter);
+          ? 2 * Math.PI * (azOffset + (slots[i] + planPrng.signedRange(0.4)) / count)
+          : 2 * Math.PI * azOffset + i * rot! + planPrng.signedRange(rotJitter);
         let len: number;
         if (isTrunk) {
           len = profile.crownSpreadRatio * crownRatio(profile.crownShape, (t - base) / Math.max(1e-6, 1 - base), profile.crownPeak);
         } else {
           len = cp.lengthRatio * length * (1 - 0.6 * t);
         }
-        len *= 1 + prng.signedRange(cp.lengthV);
+        len *= 1 + planPrng.signedRange(cp.lengthV);
         if (isTrunk && profile.crownAsymmetry) {
           len *= 1 + profile.crownAsymmetry * Math.cos(az - this.asymAz);
         }
-        if (len < 0.004) continue;
         const tRel = (t - base) / Math.max(1e-6, 1 - base);
         const down =
-          cp.downAngle + (cp.downAngleSlope ?? 0) * (1 - tRel) + prng.signedRange(cp.downAngleV);
+          cp.downAngle + (cp.downAngleSlope ?? 0) * (1 - tRel) + planPrng.signedRange(cp.downAngleV);
+        const kinkRoll = 0.6 + planPrng.next() * 0.4;
+        const reachRoll = 0.85 + planPrng.next() * 0.1;
+        if (len < 0.004) continue;
         plan.push({
+          slot: i,
           t,
           az,
           len,
           down: Math.min(110, down) * DEG,
+          kinkRoll,
+          reachRoll,
           reach: isTrunk && !!profile.limbsReachEnvelope,
         });
       }
@@ -382,6 +411,14 @@ export class GrowthContext {
       ? tipRatioBase
       : Math.max(0.12, tipRatioBase * (pruneFactor < 1 ? Math.pow(pruneFactor, 0.35) : 1));
     const taperPerSection = isTrunk ? profile.trunkTaper : p.taper;
+    // Wykładnik z długości (sekcja = 1/curveRes pędu), nie z liczby punktów: punkty odgałęzień nie przyspieszają zwężania
+    const taperSections = Math.max(1, p.curveRes);
+    // Pień: trunkTaper = ubytek całkowity (czubek = r0·(1 − x)); gałęzie: taper na sekcję
+    const taperExp = isTrunk ? 1 : taperSections;
+    const radiusAt = (tt: number) =>
+      taperPerSection !== undefined
+        ? r0 * Math.pow(Math.max(0.05, 1 - taperPerSection), tt * taperExp)
+        : r0 * (1 - tt * (1 - tipRatio));
 
     const stem: Stem = { level, px: [ox], py: [oy], pz: [oz], r: [r0], length, clipped: false };
     let x = ox,
@@ -394,6 +431,7 @@ export class GrowthContext {
     let tPrev = 0,
       pi = 0;
     const children: {
+      slot: number;
       ox: number;
       oy: number;
       oz: number;
@@ -404,6 +442,7 @@ export class GrowthContext {
       r: number;
     }[] = [];
     plan.sort((a, b) => a.t - b.t);
+    const stepPrng = new FastPrng(childSeed(bSeed, 0, 3));
 
     for (let k = 0; k < ts.length; k++) {
       const t = ts[k];
@@ -433,7 +472,7 @@ export class GrowthContext {
           dz = this.tmp[2];
         }
         if (wobble > 0) {
-          this.perturb(dx, dy, dz, wobble * Math.sqrt(dt * res), prng);
+          this.perturb(dx, dy, dz, wobble * Math.sqrt(dt * res), stepPrng);
           dx = this.tmp[0];
           dy = this.tmp[1];
           dz = this.tmp[2];
@@ -492,7 +531,7 @@ export class GrowthContext {
             stem.py.push(y);
             stem.pz.push(z);
             const tClip = tPrev + dt * lo;
-            const rClipLinear = r0 * (1 - tClip * (1 - tipRatio));
+            const rClipLinear = radiusAt(tClip);
             stem.r.push(Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rClipLinear)));
           }
           stem.length = length * (tPrev + dt * lo);
@@ -501,9 +540,7 @@ export class GrowthContext {
         x = nx;
         y = Math.max(0.01, ny);
         z = nz;
-        const rLinear = taperPerSection !== undefined
-          ? r0 * Math.pow(Math.max(0.05, 1 - taperPerSection), stem.px.length)
-          : r0 * (1 - t * (1 - tipRatio));
+        const rLinear = radiusAt(t);
         r = Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rLinear));
         stem.px.push(x);
         stem.py.push(y);
@@ -588,7 +625,7 @@ export class GrowthContext {
               ddy = Math.sin(el);
             }
           }
-          c.len = Math.max(0.02, dist * (0.85 + prng.next() * 0.1));
+          c.len = Math.max(0.02, dist * c.reachRoll);
         }
         const rBeforeChild = stem.r[stem.r.length - 1];
         const rc = Math.min(
@@ -601,11 +638,11 @@ export class GrowthContext {
           )
         );
         const kink =
-          kinkMax * Math.min(1, rc / Math.max(1e-6, r)) * (0.6 + prng.next() * 0.4);
+          kinkMax * Math.min(1, rc / Math.max(1e-6, r)) * c.kinkRoll;
         kx -= sx * Math.tan(kink);
         ky -= sy * Math.tan(kink);
         kz -= sz * Math.tan(kink);
-        const rLinear = r0 * (1 - t * (1 - tipRatio));
+        const rLinear = radiusAt(t);
         const rPrevRing = stem.r.length >= 2 ? stem.r[stem.r.length - 2] : r0;
         r = Math.min(
           rBeforeChild,
@@ -618,7 +655,17 @@ export class GrowthContext {
         );
         stem.r[stem.r.length - 1] = r;
         const rcCapped = Math.min(rc, r * 0.88);
-        children.push({ ox: x, oy: y, oz: z, dx: cx, dy: cy, dz: cz, len: c.len, r: rcCapped });
+        children.push({
+          slot: c.slot,
+          ox: x,
+          oy: y,
+          oz: z,
+          dx: cx,
+          dy: cy,
+          dz: cz,
+          len: c.len,
+          r: rcCapped,
+        });
       }
     }
 
@@ -626,6 +673,7 @@ export class GrowthContext {
     out.push(stem);
 
     for (const c of children) {
+      const cSeed = childSeed(bSeed, c.slot, 20);
       this.growBranch(
         level + 1,
         c.ox,
@@ -637,8 +685,9 @@ export class GrowthContext {
         c.len,
         c.r,
         profile,
-        prng,
-        out
+        new FastPrng(cSeed),
+        out,
+        cSeed
       );
     }
 
@@ -649,6 +698,7 @@ export class GrowthContext {
       tdy = stem.py[m] - stem.py[m - 1],
       tdz = stem.pz[m] - stem.pz[m - 1];
     const tl = Math.hypot(tdx, tdy, tdz) || 1;
+    const tipPrng = new FastPrng(childSeed(bSeed, 0, 4));
 
     if (isTrunk) {
       if (profile.trunkFork && cp) {
@@ -656,8 +706,8 @@ export class GrowthContext {
         const forkLen =
           (1 - profile.trunkHeightRatio) *
           profile.crownSpreadRatio *
-          (0.8 + prng.next() * 0.3);
-        const az0 = prng.range(0, Math.PI * 2);
+          (0.8 + tipPrng.next() * 0.3);
+        const az0 = tipPrng.range(0, Math.PI * 2);
         const numForks = profile.trunkForkCount ?? 2;
         const forkR = Math.min(tipR * 0.88, Math.max(MIN_RADIUS_RATIO * 0.5, tipR * Math.pow(numForks, -0.5)));
         for (let s = 0; s < numForks; s++) {
@@ -666,9 +716,10 @@ export class GrowthContext {
             tdy / tl,
             tdz / tl,
             az0 + (s * 2 * Math.PI) / numForks,
-            forkAngle * (0.8 + prng.next() * 0.4)
+            forkAngle * (0.8 + tipPrng.next() * 0.4)
           );
           const [fx, fy, fz] = this.tmp;
+          const fSeed = childSeed(bSeed, s, 30);
           this.growBranch(
             level + 1,
             stem.px[m],
@@ -680,8 +731,9 @@ export class GrowthContext {
             forkLen,
             forkR,
             profile,
-            prng,
-            out
+            new FastPrng(fSeed),
+            out,
+            fSeed
           );
         }
       }
@@ -690,7 +742,7 @@ export class GrowthContext {
 
     if (p.fork > 0 && cp) {
       const forkLen = length * cp.lengthRatio * 1.3;
-      const az0 = prng.range(0, Math.PI * 2);
+      const az0 = tipPrng.range(0, Math.PI * 2);
       const forkR = Math.min(tipR * 0.88, Math.max(MIN_RADIUS_RATIO * 0.5, tipR * Math.SQRT1_2));
       for (let s = 0; s < 2; s++) {
         this.splitDir(
@@ -698,9 +750,10 @@ export class GrowthContext {
           tdy / tl,
           tdz / tl,
           az0 + s * Math.PI,
-          p.fork * DEG * (0.8 + prng.next() * 0.4)
+          p.fork * DEG * (0.8 + tipPrng.next() * 0.4)
         );
         const [fx, fy, fz] = this.tmp;
+        const fSeed = childSeed(bSeed, s, 31);
         this.growBranch(
           level + 1,
           stem.px[m],
@@ -709,11 +762,12 @@ export class GrowthContext {
           fx,
           fy,
           fz,
-          forkLen * (0.85 + prng.next() * 0.3),
+          forkLen * (0.85 + tipPrng.next() * 0.3),
           forkR,
           profile,
-          prng,
-          out
+          new FastPrng(fSeed),
+          out,
+          fSeed
         );
       }
     } else if (
@@ -721,9 +775,9 @@ export class GrowthContext {
       level === deepest &&
       profile.tipSpurs !== false &&
       length > 0.01 &&
-      prng.next() < 0.5
+      tipPrng.next() < 0.5
     ) {
-      const az0 = prng.range(0, Math.PI * 2);
+      const az0 = tipPrng.range(0, Math.PI * 2);
       const spurR0 = tipR * 0.88;
       const spurR1 = spurR0 * 0.82;
       for (let s = 0; s < 2; s++) {
@@ -732,10 +786,10 @@ export class GrowthContext {
           tdy / tl,
           tdz / tl,
           az0 + s * Math.PI,
-          (22 + prng.next() * 12) * DEG
+          (22 + tipPrng.next() * 12) * DEG
         );
         const [fx, fy, fz] = this.tmp;
-        const sl = length * (0.12 + prng.next() * 0.08);
+        const sl = length * (0.12 + tipPrng.next() * 0.08);
         out.push({
           level: level + 1,
           px: [stem.px[m], stem.px[m] + fx * sl],

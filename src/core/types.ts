@@ -189,8 +189,8 @@ export interface SpeciesProfile {
   trunkLengthRatio: number;      // Długość przewodnika / wysokość (< 1: przewodnik ginie w koronie)
   trunkTipRatio?: number;        // Ułamek promienia pnia na szczycie względem podstawy (domyślnie 0.3; < 0.15: przewodnik silnie zbieżny i zanika)
   /**
-   * Współczynnik zwężania grubości pnia na sekcję (0.0–1.0); nadpisuje `trunkTipRatio`.
-   * @deprecated Zależy od liczby sekcji pnia — użyj `trunkTipRatio`. Działa bez zmian dla zgodności wstecznej.
+   * Wykładnicze zwężanie pnia — ubytek całkowity: r(t) = r0·(1 − trunkTaper)^t, czubek = r0·(1 − trunkTaper)
+   * (0.5 = czubek o połowę cieńszy). Brak = liniowo do `trunkTipRatio`.
    */
   trunkTaper?: number;
   trunkCurveV: number;           // Falowanie przewodnika (stopnie na segment)
