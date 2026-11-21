@@ -86,11 +86,11 @@ export class CrownEnvelope {
 
   isOutside(x: number, y: number, z: number, bypassRadial = false): boolean {
     if (!this.profile) return false;
-    if (y > ENVELOPE_CEILING) return true;
+    if (this.shape !== 'CYLINDRICAL' && y > ENVELOPE_CEILING) return true;
     if (y < this.groundClearance) return true;
     if (this.disabled) return false;
     const t = Math.max(0, (y - this.base) * this.invH);
-    if (t > ENVELOPE_CEILING) return true;
+    if (this.shape !== 'CYLINDRICAL' && t > ENVELOPE_CEILING) return true;
     const R0 = this.spread * crownRatio(this.shape, t, this.peak);
     const R = bypassRadial ? R0 * ENVELOPE_RADIAL_BYPASS : R0;
     return x * x + z * z > R * R;

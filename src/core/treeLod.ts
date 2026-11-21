@@ -31,8 +31,10 @@ export const TREE_LOD_MIN_PIXELS_PER_UNIT_MAX: Readonly<Record<TreeLodName, numb
  * - `near`: wszystkie miejsca liści profilu szkieletu, liście sześciokątne; pień, konary i gałęzie bez najgłębszego rzędu,
  * - `mid`: pełny rysunek konarów (otwarte pręty trójkątne), gałęzie od najdłuższych zbiegające się w szpic; mniej liści,
  *   większych, o tym samym sześciokątnym obrysie,
- * - `far`: pień i główne konary; jeszcze mniej, większych liści o obrysie pięciokąta (sześciokąt ze ściętym końcem),
+ * - `far`: pień i główne konary; jeszcze mniej, większych liści o obrysie latawca (2 trójkąty, pole sześciokąta),
  * - `shell`: pień z kilkoma konarami, zamknięty rdzeń korony i kilkanaście dużych liści na nim (maska konturu i cień korony).
+ * `mid`/`far` mają twardy budżet liści (`maxLeaves`) i względny ułamek miejsc (`leafKeep`); liść rośnie do
+ * `MAX_LEAF_SIZE_SCALE_BUDGET`, a pokrycie korony spada, gdy budżet na nie nie starcza.
  * Liść poziomu dalszego to powiększony liść poziomu bliskiego — ten sam obrys i rozkład orientacji, więc to samo
  * oświetlenie; miejsca liści są zagnieżdżone (shell ⊂ far ⊂ mid ⊂ near), pokryta powierzchnia korony jest ta sama.
  * Poziomy odnoszą się do profilu szkieletu: gęstość, wielkość i kępki liści widoku bliskiego ustala wywołujący
@@ -55,7 +57,8 @@ export const TREE_LOD_PRESETS: Readonly<Record<TreeLodName, Readonly<TreeMeshLod
     branchSides: 2,
     maxBarkTriangles: 450,
     leafShape: 'hex',
-    maxLeaves: 170,
+    leafKeep: 0.45,
+    maxLeaves: 1000,
   },
   far: {
     dropDeepestLevels: 1,
@@ -65,8 +68,9 @@ export const TREE_LOD_PRESETS: Readonly<Record<TreeLodName, Readonly<TreeMeshLod
     trunkSides: 3,
     branchSides: 2,
     maxBarkTriangles: 120,
-    leafShape: 'penta',
-    maxLeaves: 80,
+    leafShape: 'quad',
+    leafKeep: 0.25,
+    maxLeaves: 500,
     leafCoverage: 0.7,
   },
   shell: {

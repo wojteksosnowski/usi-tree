@@ -53,12 +53,20 @@ export class GrowthContext {
       this.growLeaders(n, 0, R0, 16, 12, L * 0.72, L * 0.2, profile, prng, out);
     } else if (form === 'SINGLE' && profile.scaffoldLimbs) {
       const baseY = profile.trunkHeightRatio;
+      const baseSegs = 6;
+      const basePy: number[] = [];
+      const baseR: number[] = [];
+      for (let i = 0; i <= baseSegs; i++) {
+        const u = i / baseSegs;
+        basePy.push(baseY * u);
+        baseR.push(R0 * (1 - 0.1 * u));
+      }
       out.push({
         level: 0,
-        px: [0, 0],
-        py: [0, baseY],
-        pz: [0, 0],
-        r: [R0, R0 * 0.9],
+        px: new Array(baseSegs + 1).fill(0),
+        py: basePy,
+        pz: new Array(baseSegs + 1).fill(0),
+        r: baseR,
         length: baseY,
         clipped: false,
       });
@@ -85,12 +93,28 @@ export class GrowthContext {
       const tz = Math.sin(lean) * Math.sin(az0);
       const ty = Math.cos(lean);
       const rTop = R0 * 0.8;
+      const asym = Math.min(1, Math.max(0, profile.trunkForkAsymmetry ?? 0));
+      const rSide = rTop * (0.72 - 0.25 * asym) * (profile.trunkForkSideRadius ?? 1);
+      const rMain = rTop * 0.95;
+      const rTopFork = rMain;
+      const baseSegs = 6;
+      const basePx: number[] = [];
+      const basePy: number[] = [];
+      const basePz: number[] = [];
+      const baseR: number[] = [];
+      for (let i = 0; i <= baseSegs; i++) {
+        const u = i / baseSegs;
+        basePx.push(tx * forkY * u);
+        basePy.push(ty * forkY * u);
+        basePz.push(tz * forkY * u);
+        baseR.push(R0 + (rTopFork - R0) * u);
+      }
       out.push({
         level: 0,
-        px: [0, tx * forkY * 0.5, tx * forkY],
-        py: [0, ty * forkY * 0.5, ty * forkY],
-        pz: [0, tz * forkY * 0.5, tz * forkY],
-        r: [R0, R0 * 0.9, rTop],
+        px: basePx,
+        py: basePy,
+        pz: basePz,
+        r: baseR,
         length: forkY,
         clipped: false,
       });
@@ -99,13 +123,12 @@ export class GrowthContext {
         this.leaderTropism = profile.trunkForkTropism;
       }
       const spread = (profile.trunkForkAngle ?? 32) * (0.85 + prng.next() * 0.3);
-      const asym = Math.min(1, Math.max(0, profile.trunkForkAsymmetry ?? 0));
       const leaders = [
         {
           az: az0 + Math.PI,
           angle: spread * (0.35 - 0.25 * asym) * (profile.trunkForkMainAngleScale ?? 1),
           len: 1.0,
-          r: rTop * (0.82 + 0.08 * asym),
+          r: rMain,
         },
         {
           az: az0 + prng.signedRange(0.5),
@@ -114,17 +137,18 @@ export class GrowthContext {
             (0.85 + prng.next() * 0.1) *
             (1 - 0.3 * asym) *
             (profile.trunkForkSideLength ?? 1),
-          r: rTop * (0.72 - 0.25 * asym) * (profile.trunkForkSideRadius ?? 1),
+          r: rSide,
         },
       ];
+      const embedY = Math.max(0, forkY - rTopFork * 0.4);
       for (const ld of leaders) {
         this.splitDir(tx, ty, tz, ld.az, ld.angle * DEG);
         const [dx, dy, dz] = this.tmp;
         this.growBranch(
           0,
-          tx * forkY,
-          ty * forkY,
-          tz * forkY,
+          tx * embedY,
+          ty * embedY,
+          tz * embedY,
           dx,
           dy,
           dz,
@@ -140,7 +164,13 @@ export class GrowthContext {
     }
 
     for (const s of out) {
-      if (s.level === 0 && s.py[0] < 1e-6) s.r[0] *= profile.flareFactor;
+      if (s.level === 0 && s.py[0] < 1e-6) {
+        const flareSpan = Math.max(2, Math.ceil(s.r.length * 0.25));
+        for (let i = 0; i < Math.min(s.r.length, flareSpan); i++) {
+          const u = i / flareSpan;
+          s.r[i] *= 1 + (profile.flareFactor - 1) * (1 - u) * (1 - u);
+        }
+      }
     }
     return out;
   }
@@ -215,7 +245,7 @@ export class GrowthContext {
       : profile.levels[level - 1];
     const cp = profile.levels[level];
     const deepest = profile.levels.length;
-    const clipProb = profile.envelopeClipProbability ?? 1.0;
+    const clipProb = profile.envelopeClipProbability ?? 0.72;
 
     const bypassRadial =
       !isTrunk &&
@@ -265,7 +295,7 @@ export class GrowthContext {
         const suppression = Math.pow(Math.max(PRUNE_MIN_FRACTION, f), 0.35);
         const k = Math.max(PRUNE_MIN_FRACTION, f * suppression) * PRUNE_MARGIN;
         length *= k;
-        r0 = Math.max(MIN_RADIUS_RATIO, r0 * Math.pow(k, profile.ratioPower) * suppression);
+        r0 = Math.min(r0, Math.max(MIN_RADIUS_RATIO, r0 * Math.pow(k, profile.ratioPower) * suppression));
       }
     }
 
@@ -351,6 +381,7 @@ export class GrowthContext {
     const tipRatio = isTrunk
       ? tipRatioBase
       : Math.max(0.12, tipRatioBase * (pruneFactor < 1 ? Math.pow(pruneFactor, 0.35) : 1));
+    const taperPerSection = isTrunk ? profile.trunkTaper : p.taper;
 
     const stem: Stem = { level, px: [ox], py: [oy], pz: [oz], r: [r0], length, clipped: false };
     let x = ox,
@@ -460,7 +491,9 @@ export class GrowthContext {
             stem.px.push(x);
             stem.py.push(y);
             stem.pz.push(z);
-            stem.r.push(Math.max(MIN_RADIUS_RATIO * 0.6, Math.min(r * 0.5, r0 * 0.1)));
+            const tClip = tPrev + dt * lo;
+            const rClipLinear = r0 * (1 - tClip * (1 - tipRatio));
+            stem.r.push(Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rClipLinear)));
           }
           stem.length = length * (tPrev + dt * lo);
           break;
@@ -468,7 +501,10 @@ export class GrowthContext {
         x = nx;
         y = Math.max(0.01, ny);
         z = nz;
-        r = Math.max(MIN_RADIUS_RATIO * 0.6, Math.min(r, r0 * (1 - t * (1 - tipRatio))));
+        const rLinear = taperPerSection !== undefined
+          ? r0 * Math.pow(Math.max(0.05, 1 - taperPerSection), stem.px.length)
+          : r0 * (1 - t * (1 - tipRatio));
+        r = Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rLinear));
         stem.px.push(x);
         stem.py.push(y);
         stem.pz.push(z);
@@ -554,29 +590,35 @@ export class GrowthContext {
           }
           c.len = Math.max(0.02, dist * (0.85 + prng.next() * 0.1));
         }
-        const rc = Math.max(
-          MIN_RADIUS_RATIO,
-          Math.min(
-            r * 0.85,
+        const rBeforeChild = stem.r[stem.r.length - 1];
+        const rc = Math.min(
+          r * 0.85,
+          Math.max(
+            MIN_RADIUS_RATIO * 0.4,
             r *
               Math.pow(c.len / Math.max(1e-6, length), profile.ratioPower) *
               (this.flow ? 1.15 : 1.6)
           )
         );
-        children.push({ ox: x, oy: y, oz: z, dx: cx, dy: cy, dz: cz, len: c.len, r: rc });
-
         const kink =
           kinkMax * Math.min(1, rc / Math.max(1e-6, r)) * (0.6 + prng.next() * 0.4);
         kx -= sx * Math.tan(kink);
         ky -= sy * Math.tan(kink);
         kz -= sz * Math.tan(kink);
         const rLinear = r0 * (1 - t * (1 - tipRatio));
-        r = Math.max(
-          MIN_RADIUS_RATIO * 0.6,
-          rLinear * 0.75,
-          Math.sqrt(Math.max(0, r * r - 0.7 * rc * rc))
+        const rPrevRing = stem.r.length >= 2 ? stem.r[stem.r.length - 2] : r0;
+        r = Math.min(
+          rBeforeChild,
+          Math.max(
+            MIN_RADIUS_RATIO * 0.6,
+            rPrevRing * 0.82,
+            rLinear * 0.82,
+            Math.sqrt(Math.max(0, r * r - 0.7 * rc * rc))
+          )
         );
-        stem.r[stem.r.length - 1] = Math.max(stem.r[stem.r.length - 1], r);
+        stem.r[stem.r.length - 1] = r;
+        const rcCapped = Math.min(rc, r * 0.88);
+        children.push({ ox: x, oy: y, oz: z, dx: cx, dy: cy, dz: cz, len: c.len, r: rcCapped });
       }
     }
 
@@ -617,6 +659,7 @@ export class GrowthContext {
           (0.8 + prng.next() * 0.3);
         const az0 = prng.range(0, Math.PI * 2);
         const numForks = profile.trunkForkCount ?? 2;
+        const forkR = Math.min(tipR * 0.88, Math.max(MIN_RADIUS_RATIO * 0.5, tipR * Math.pow(numForks, -0.5)));
         for (let s = 0; s < numForks; s++) {
           this.splitDir(
             tdx / tl,
@@ -635,7 +678,7 @@ export class GrowthContext {
             fy,
             fz,
             forkLen,
-            Math.max(MIN_RADIUS_RATIO, tipR * Math.pow(numForks, -0.5)),
+            forkR,
             profile,
             prng,
             out
@@ -648,6 +691,7 @@ export class GrowthContext {
     if (p.fork > 0 && cp) {
       const forkLen = length * cp.lengthRatio * 1.3;
       const az0 = prng.range(0, Math.PI * 2);
+      const forkR = Math.min(tipR * 0.88, Math.max(MIN_RADIUS_RATIO * 0.5, tipR * Math.SQRT1_2));
       for (let s = 0; s < 2; s++) {
         this.splitDir(
           tdx / tl,
@@ -666,7 +710,7 @@ export class GrowthContext {
           fy,
           fz,
           forkLen * (0.85 + prng.next() * 0.3),
-          Math.max(MIN_RADIUS_RATIO, tipR * Math.SQRT1_2),
+          forkR,
           profile,
           prng,
           out
@@ -680,6 +724,8 @@ export class GrowthContext {
       prng.next() < 0.5
     ) {
       const az0 = prng.range(0, Math.PI * 2);
+      const spurR0 = tipR * 0.88;
+      const spurR1 = spurR0 * 0.82;
       for (let s = 0; s < 2; s++) {
         this.splitDir(
           tdx / tl,
@@ -695,7 +741,7 @@ export class GrowthContext {
           px: [stem.px[m], stem.px[m] + fx * sl],
           py: [stem.py[m], stem.py[m] + fy * sl],
           pz: [stem.pz[m], stem.pz[m] + fz * sl],
-          r: [Math.max(MIN_RADIUS_RATIO * 0.6, tipR), MIN_RADIUS_RATIO * 0.5],
+          r: [spurR0, spurR1],
           length: sl,
           clipped: false,
         });

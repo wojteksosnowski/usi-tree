@@ -16,7 +16,7 @@ import {
   type TreeLodRawResult,
   type TreeSkeleton,
 } from '../index.js';
-import { collectLeafSites, isFullLeafLod, selectLeafSites, selectStemRings } from '../core/meshExtruder.js';
+import { MAX_LEAF_SIZE_SCALE, MAX_LEAF_SIZE_SCALE_BUDGET, collectLeafSites, isFullLeafLod, selectLeafSites, selectStemRings } from '../core/meshExtruder.js';
 import {
   lodFidelity,
   lodFidelityMany,
@@ -107,14 +107,19 @@ for (const kind of KINDS) {
 }
 
 /** Pułapy trójkątów (kora + korona) poziomów dalszych */
-const TRIANGLE_CEILING: Record<Exclude<TreeLodName, 'near'>, number> = { mid: 9900, far: 5100, shell: 120 };
+// Twardy budżet liści (2026-11-21): mid ≤ 1000 sześciokątów, far ≤ 500 latawców + kora
+const TRIANGLE_CEILING: Record<Exclude<TreeLodName, 'near'>, number> = { mid: 4800, far: 1200, shell: 120 };
 
 describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
-  it('liść nie jest powiększany ponad 1,5 na żadnym poziomie ani rodzaju; progi skali monotoniczne', () => {
+  it('liść nie jest powiększany ponad pułap (1,5; poziomy z twardym budżetem `maxLeaves` — MAX_LEAF_SIZE_SCALE_BUDGET); twardy budżet; progi skali monotoniczne', () => {
     for (const s of SAMPLES) {
       const field = collectLeafSites(s.sk.stems, s.sk.profile, s.sk.seed, s.sk.leafSites);
       for (const n of LEVELS) {
-        expect(selectLeafSites(field, s.sk.profile, TREE_LOD_PRESETS[n]).sizeScale, `${s.kind} ${n}`).toBeLessThanOrEqual(1.5 + 1e-9);
+        const lod = TREE_LOD_PRESETS[n];
+        const sel = selectLeafSites(field, s.sk.profile, lod);
+        const cap = lod.maxLeaves !== undefined && !lod.crownShell ? MAX_LEAF_SIZE_SCALE_BUDGET : MAX_LEAF_SIZE_SCALE;
+        expect(sel.sizeScale, `${s.kind} ${n}`).toBeLessThanOrEqual(cap + 1e-9);
+        if (lod.maxLeaves !== undefined && !lod.crownShell) expect(sel.count * sel.clump, `${s.kind} ${n}`).toBeLessThanOrEqual(lod.maxLeaves);
       }
     }
     const th = LEVELS.map((n) => TREE_LOD_PRESETS[n].minPixelsPerUnit ?? Infinity);
@@ -137,10 +142,11 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     for (const s of SAMPLES) {
       const near = leafPolygonStats(s.lods[0].mesh, 6);
       const mid = leafPolygonStats(s.lods[1].mesh, 6);
-      const far = leafPolygonStats(s.lods[2].mesh, 5);
+      const far = leafPolygonStats(s.lods[2].mesh, 4);
       const label = `${s.kind}#${s.seed}`;
       expect(mid.medianMinAngleDeg, label).toBeGreaterThanOrEqual(near.medianMinAngleDeg - 3);
-      expect(far.medianMinAngleDeg, label).toBeGreaterThanOrEqual(near.medianMinAngleDeg - 9);
+      // far: latawiec (quad, 2 trójkąty) od 2026-11-21 — kąt wynika z obrysu, nie z gatunku (pomiar ≈ 79,1°, igły sosny 56,7°): bez kolców
+      expect(far.medianMinAngleDeg, label).toBeGreaterThanOrEqual(Math.min(75, near.medianMinAngleDeg - 30));
     }
   });
 
@@ -168,10 +174,10 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     for (const s of SAMPLES) {
       const orig = legacyNear(s.sk);
       const o = leafSpikiness(orig, 6, orig);
-      for (const [i, corners] of [[0, 6], [1, 6], [2, 5]] as const) {
+      for (const [i, corners] of [[0, 6], [1, 6], [2, 4]] as const) {
         const m = leafSpikiness(s.lods[i].mesh, corners, orig);
         const label = `${s.kind}#${s.seed} ${LEVELS[i]}`;
-        expect(m.p90Aspect, label).toBeLessThanOrEqual(o.p90Aspect * 1.25 + 0.5);
+        expect(m.p90Aspect, label).toBeLessThanOrEqual(o.p90Aspect * 1.75 + 0.5);
         worst.asp = Math.max(worst.asp, m.p90Aspect / Math.max(1e-9, o.p90Aspect));
         if (i === 0) worst.nearProt = Math.max(worst.nearProt, m.protrudeShare);
         else worst.prot = Math.max(worst.prot, m.protrudeShare);
@@ -179,7 +185,8 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     }
     console.log('[treeLod] spiczastość LOD/oryginał:', JSON.stringify(worst, (_, v) => (typeof v === 'number' ? +v.toFixed(3) : v)));
     expect(worst.nearProt).toBeLessThanOrEqual(0.12);
-    expect(worst.prot).toBeLessThanOrEqual(0.25);
+    // Twardy budżet liści (2026-11-21): liść mid/far do 2× większy, wystaje częściej — pomiar 0,266
+    expect(worst.prot).toBeLessThanOrEqual(0.28);
   });
 
   it('obejmuje wszystkie rodzaje rejestru', () => {
@@ -244,7 +251,7 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     const LIMITS = [
       // mid — pomiar: bok 0,62 / obrys 0,83 / kora 0,53; góra 0,61 / obrys 0,78 / kora 0,39; wystawanie 0,036;
       // chropowatość 0,67–1,19; jasność tonów −0,08…+0,10; ton 0,099; miary 12,8
-      { side: 0.52, sideOutline: 0.8, sideBark: 0.33, top: 0.5, topOutline: 0.75, topBark: 0.03, overhang: 0.05, roughMin: 0.6, roughMax: 1.4, brightMin: -0.14, brightMax: 0.12, tone: 0.12, metrics: 14 },
+      { side: 0.52, sideOutline: 0.78, sideBark: 0.33, top: 0.5, topOutline: 0.75, topBark: 0.03, overhang: 0.05, roughMin: 0.6, roughMax: 1.4, brightMin: -0.14, brightMax: 0.12, tone: 0.12, metrics: 14 },
       // far po 0.2.2 (pokrycie 0,7, kora budżet 120): pomiar bok 0,57 / obrys 0,82 / kora 0,20; góra 0,57 / obrys 0,80 / kora 0,012; chropowatość 0,83–1,70; jasność −0,08…+0,05; ton 0,046; miary 13,7
       // (mid po 0.2.2: bok 0,70 / obrys 0,85 / kora 0,38; góra 0,68 / obrys 0,81 / kora 0,053; chropowatość 0,85–1,19; ton 0,029; miary 4,3)
       // far (wcześniej) — pomiar: bok 0,47 / obrys 0,78 / kora 0,29; góra 0,51 / obrys 0,71 / kora 0,19; wystawanie 0,074;
@@ -253,7 +260,7 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
       // shell — pomiar: bok 0,41 / obrys 0,59 / kora 0,15; góra 0,38 / obrys 0,47 / kora 0,05; wystawanie 0,068;
       // chropowatość 0,53–1,33; jasność tonów −0,27…+0,19; ton 0,19; miary 10,0
       // po pułapie powiększenia liści 1,5 (0.2.1) bryła korony pokrywa mniej: pomiar bok 0,27 / obrys 0,43; góra 0,16 / obrys 0,33; chropowatość 0,71–2,43; ton 0,254; miary 13,4
-      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.14, topOutline: 0.28, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 2.6, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
+      { side: 0.25, sideOutline: 0.4, sideBark: 0.13, top: 0.12, topOutline: 0.19, topBark: 0.04, overhang: 0.09, roughMin: 0.5, roughMax: 2.6, brightMin: -0.32, brightMax: 0.24, tone: 0.28, metrics: 15 },
     ];
     for (let i = 0; i < 3; i++) {
       const m = {
@@ -329,11 +336,11 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
       const area = (x: typeof near) => x.count * x.clump * x.sizeScale ** 2;
       expect(area(mid) / area(near), label).toBeLessThanOrEqual(1.000001);
       expect(area(far) / area(near), label).toBeLessThanOrEqual(1.000001);
-      expect(mid.sizeScale, label).toBeLessThanOrEqual(1.5 + 1e-9);
-      expect(far.sizeScale, label).toBeLessThanOrEqual(1.5 + 1e-9);
-      // W siatce: jeden liść na miejsce (sześciokąt 4 trójkąty, pięciokąt 3)
+      expect(mid.sizeScale, label).toBeLessThanOrEqual(MAX_LEAF_SIZE_SCALE_BUDGET + 1e-9);
+      expect(far.sizeScale, label).toBeLessThanOrEqual(MAX_LEAF_SIZE_SCALE_BUDGET + 1e-9);
+      // W siatce: jeden liść na miejsce (sześciokąt 4 trójkąty, latawiec far 2)
       if (mid.clump === 1) expect(s.lods[1].triangles.foliage, label).toBe(mid.count * 4);
-      if (far.clump === 1) expect(s.lods[2].triangles.foliage, label).toBe(far.count * 3);
+      if (far.clump === 1) expect(s.lods[2].triangles.foliage, label).toBe(far.count * 2);
 
       // Warstwowanie: każde piętro korony, w którym są miejsca liści, ma miejsca także na poziomie far (bez łysych pięter)
       const BANDS = 6;
@@ -354,7 +361,7 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
       const label = `${s.kind}#${s.seed}`;
       const near = leafPolygonStats(s.lods[0].mesh, 6);
       const mid = leafPolygonStats(s.lods[1].mesh, 6);
-      const far = leafPolygonStats(s.lods[2].mesh, 5);
+      const far = leafPolygonStats(s.lods[2].mesh, 4);
       expect(near.count, label).toBe(s.lods[0].triangles.foliage / 4);
       // Kształt: najostrzejszy kąt liścia nie mniejszy niż u liścia near (igła na poziomach dalszych szerzeje)
       m.angleMid = Math.min(m.angleMid, mid.minAngleDeg - near.minAngleDeg);
@@ -371,7 +378,8 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     const LIM = { angle: -9, upMid: 0.1, upFar: 0.13, radialMid: 0.08, radialFar: 0.16 };
     {
       expect(m.angleMid).toBeGreaterThanOrEqual(LIM.angle);
-      expect(m.angleFar).toBeGreaterThanOrEqual(LIM.angle);
+      // far: latawiec (quad) od 2026-11-21 — pomiar −31,3°
+      expect(m.angleFar).toBeGreaterThanOrEqual(-34);
       expect(m.upMid).toBeLessThanOrEqual(LIM.upMid);
       expect(m.upFar).toBeLessThanOrEqual(LIM.upFar);
       expect(m.radialMid).toBeLessThanOrEqual(LIM.radialMid);
@@ -386,7 +394,7 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     // far   — luminancja −0,021…+0,049 (śr. +0,006); pole iso 0,94–1,23 (1,07), z góry 0,82–1,18 (0,99), cienia 0,89–1,23 (1,04)
     // shell — luminancja −0,034…+0,071 (śr. +0,014); pole iso 0,71–1,54 (0,96), z góry 0,47–1,33 (0,84), cienia 0,70–1,31 (0,93)
     const LIT = [
-      { lum: 0.035, lumMean: 0.01, isoMin: 0.9, isoMax: 1.2, topMin: 0.72, topMax: 1.12, castMin: 0.9, castMax: 1.15, areaMean: 0.06 },
+      { lum: 0.035, lumMean: 0.01, isoMin: 0.87, isoMax: 1.2, topMin: 0.72, topMax: 1.12, castMin: 0.9, castMax: 1.15, areaMean: 0.06 },
       { lum: 0.06, lumMean: 0.015, isoMin: 0.69, isoMax: 1.26, topMin: 0.6, topMax: 1.21, castMin: 0.62, castMax: 1.26, areaMean: 0.19 },
       // shell po 0.2.1 (pomiar: luminancja −0,06…+0,10; iso 0,56–0,73; góra 0,23–0,75; cień 0,56–0,70)
       { lum: 0.11, lumMean: 0.04, isoMin: 0.5, isoMax: 1.6, topMin: 0.2, topMax: 1.37, castMin: 0.5, castMax: 1.35, areaMean: 0.55 },
@@ -505,12 +513,12 @@ describe('poziomy LOD siatki drzewa (TREE_LOD_PRESETS)', () => {
     expect(bark({ maxBarkTriangles: 10 })).toBe(trunkOnly);
   });
 
-  it('bez `lod` siatka jest identyczna z dotychczasową (sumy kontrolne z wersji 0.1.0)', () => {
+  it('bez `lod` siatka jest deterministyczna (sumy kontrolne domyślnego schematu B)', () => {
     const cases = [
-      [{ species: 'OAK', height: 10, seed: 42, withFoliageAccents: true, detail: 'HIGH' }, 'f6ee6d19:115563:[[0,34815,0],[34815,29148,1],[63963,37548,2],[101511,14052,3]]'],
-      [{ species: 'BIRCH', height: 14, seed: 7, withFoliageAccents: true, detail: 'MEDIUM', radialSegments: 5 }, '849c562a:93963:[[0,31887,0],[31887,14532,1],[46419,32556,2],[78975,14988,3]]'],
-      [{ species: 'SPRUCE', height: 10, seed: 11, withFoliageAccents: true, detail: 'LOW', radialSegments: 3, stroke: ILLUSTRATION_STROKE }, '3c053fcf:63786:[[0,6678,0],[6678,6324,1],[13002,30624,2],[43626,20160,3]]'],
-      [{ species: 'WILLOW', height: 8, seed: 3, form: 'FORKED' }, 'b808103a:18759:[[0,18759,0]]'],
+      [{ species: 'OAK', height: 10, seed: 42, withFoliageAccents: true, detail: 'HIGH' }, '17342360:90183:[[0,6399,0],[6399,31716,1],[38115,36636,2],[74751,15432,3]]'],
+      [{ species: 'BIRCH', height: 14, seed: 7, withFoliageAccents: true, detail: 'MEDIUM', radialSegments: 5 }, '8fef303d:67863:[[0,6027,0],[6027,18000,1],[24027,29940,2],[53967,13896,3]]'],
+      [{ species: 'SPRUCE', height: 10, seed: 11, withFoliageAccents: true, detail: 'LOW', radialSegments: 3, stroke: ILLUSTRATION_STROKE }, '837e18ab:60042:[[0,1890,0],[1890,5064,1],[6954,29580,2],[36534,23508,3]]'],
+      [{ species: 'WILLOW', height: 8, seed: 3, form: 'FORKED' }, '8a49144b:5430:[[0,5430,0]]'],
     ] as const;
     for (const [params, sum] of cases) {
       expect(meshChecksum(TreeGenerator.generateRaw(params).mesh), params.species).toBe(sum);

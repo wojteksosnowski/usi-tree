@@ -58,6 +58,9 @@ export interface TreeGenerationParams {
   ez?: EzTreeOptions;           // Wzrost pnia, gałęzi i miejsc liści wg ez-tree (`ezTree.ts`); profil służy wtedy tylko siatce (kreska, liście)
   stroke?: TreeStroke;          // Kreska siatki (tylko grubość tub; szkielet bez zmian), domyślnie jak w szkielecie
   lod?: TreeMeshLod;            // Degradacja geometryczna siatki z zachowaniem wyglądu (zastępuje `detail`); brak = dotychczasowe zachowanie
+  doubleSidedTwigs?: boolean;   // Wstęgi gałązek L3+: false (domyślnie, schemat B dla DoubleSide) = 1 strona; true (schemat C dla FrontSide) = Front+Back
+  wind?: { strength: number; dirX?: number; dirZ?: number; time?: number };
+  windAttributes?: boolean;     // Dołącz atrybut `windData` do siatki (wiatr w vertex shaderze, np. `applyTreeWind` z `usi-tree/three`); siatka bez zmian
 }
 
 /**
@@ -93,7 +96,10 @@ export interface TreeMeshLod {
   leafClumpScale?: number;
   /** Dodatkowy mnożnik długości liścia (po kompensacji pola) — masa barwna korony względem profilu */
   leafSizeScale?: number;
-  /** Pułap liczby liści drzewa: ogranicza `leafKeep` u rodzajów o gęstej koronie (kompensacja pola jak przy `leafKeep`) */
+  /**
+   * Twardy pułap liczby liści drzewa (liście × kępka ≤ maxLeaves). Budżet wygrywa z pokryciem: liść rośnie najwyżej do
+   * `MAX_LEAF_SIZE_SCALE_BUDGET`, resztę pola poziom traci. Poziom nigdy nie bierze więcej miejsc niż poziom bliski.
+   */
   maxLeaves?: number;
   /**
    * Pułap liczby pędów rzędu ≥ 1: zostają najpierw wszystkie konary, potem gałęzie — w każdym rzędzie od największego
@@ -140,6 +146,12 @@ export interface RawTreeMesh {
   normals: Float32Array;
   indices: Uint16Array | Uint32Array;
   groups: { start: number; count: number; materialIndex: number }[];
+  /**
+   * Dane wiatru GPU (tylko przy `windAttributes: true`), vec3 na wierzchołek:
+   * x = ugięcie gałęzi (0 pień, rośnie z rzędem i odległością od nasady, × wiotkość gatunku),
+   * y = faza pędu [0, 2π), z = trzepot (1 listowie, 0 kora). Zginanie całego pnia shader liczy z wysokości.
+   */
+  windData?: Float32Array;
   boundingBox: {
     min: [number, number, number];
     max: [number, number, number];
@@ -183,6 +195,12 @@ export interface BranchLevelParams {
   kink?: number;        // Maks. załamanie pędu w węźle odgałęzienia, w stronę przeciwną do dziecka (stopnie, domyślnie 15)
   fork: number;         // Kąt rozwidlenia „Y” na końcu pędu (stopnie, 0 = brak) — kontynuacja jak w ez-tree
   tipRatio?: number;    // Ułamek promienia pędu na końcu względem nasady (domyślnie: p.fork > 0 ? 0.5 : 0.22)
+  /**
+   * Współczynnik zwężania grubości gałęzi na sekcję (0.0–1.0); nadpisuje `tipRatio`.
+   * @deprecated Zależy od liczby sekcji (`curveRes`): zmiana rozdzielczości pędu zmienia jego grubość. Użyj `tipRatio`.
+   * Żaden wbudowany ani dostrojony profil go nie ustawia; działa bez zmian dla zgodności wstecznej.
+   */
+  taper?: number;
   // Rozszerzenia z Sapling Tree Gen (Weber–Penn); brak pola = dotychczasowy wynik
   curveBack?: number;   // Wygięcie drugiej połowy pędu (stopnie, + ku górze); wtedy `curve` działa na pierwszej połowie — łuk esowaty (konar brzozy: w górę, końcówka w dół)
   baseSize?: number;    // Początek odgałęzień tego rzędu na rodzicu (ułamek jego długości, domyślnie 0.1; konary na pniu — trunkHeightRatio)
@@ -195,6 +213,11 @@ export interface SpeciesProfile {
   trunkBaseRadiusRatio: number;  // Promień pnia u podstawy / wysokość
   trunkLengthRatio: number;      // Długość przewodnika / wysokość (< 1: przewodnik ginie w koronie)
   trunkTipRatio?: number;        // Ułamek promienia pnia na szczycie względem podstawy (domyślnie 0.3; < 0.15: przewodnik silnie zbieżny i zanika)
+  /**
+   * Współczynnik zwężania grubości pnia na sekcję (0.0–1.0); nadpisuje `trunkTipRatio`.
+   * @deprecated Zależy od liczby sekcji pnia — użyj `trunkTipRatio`. Działa bez zmian dla zgodności wstecznej.
+   */
+  trunkTaper?: number;
   trunkCurveV: number;           // Falowanie przewodnika (stopnie na segment)
   crownSpreadRatio: number;      // Skala długości konarów względem wysokości
   crownShape: CrownShape;
@@ -206,13 +229,19 @@ export interface SpeciesProfile {
   flareFactor: number;           // Rozszerzenie pnia przy gruncie
   radialSegments?: number;       // Domyślna liczba boków przekroju tuby (3-5)
   leafSizeRatio: number;         // Długość liścia / wysokość drzewa
+  leafSizeCm?: number;           // Absolutna długość liścia w cm (opcjonalna; ma priorytet nad leafSizeRatio)
   leafAspect?: number;           // Szerokość / długość liścia (domyślnie 0.55)
+  leafShape?: 'tri' | 'quad' | 'penta' | 'hex'; // Kształt liścia (1, 2, 3 lub 4 trójkąty)
+  leafOutline?: number[];        // Własny obrys liścia [along0, across0, ...] (nadpisuje leafShape)
+  petioleLengthRatio?: number;   // Długość szypułki jako ułamek długości liścia (domyślnie 0.15; nie generuje trójkątów)
+  petiolePliancy?: number;       // Miękkość/uginanie szypułki (0.0–1.0)
+  leafFlatness?: number;         // Spłaszczenie poziome liści (0.0–1.0)
   leafClump?: number;            // Liści w kępce (domyślnie 5)
   leafDensity?: number;          // Kępek na jednostkę długości witki, w skali nominalnej (domyślnie 60)
   limbsReachEnvelope?: boolean;  // Konary sięgają konturu korony (pokrój rozpierzchły: buk, lipa, kasztanowiec, wiąz)
   disableEnvelope?: boolean;    // Wyłącza sztywne docinanie obwiednią (pozwala na swobodny zwis wierzby/brzozy płaczącej)
   envelopeScale?: number;       // Mnożnik promienia obwiedni docinającej (domyślnie 1.0; > 1 daje luźniejszą koronę)
-  envelopeClipProbability?: number; // Prawdopodobieństwo przycięcia pędu przez obwiednię korony (domyślnie 1.0; np. 0.70 = 30% szans na swobodny wzrost pędu poza obwiednię)
+  envelopeClipProbability?: number; // Prawdopodobieństwo przycięcia pędu przez obwiednię korony (domyślnie 0.72; np. 0.70 = 30% szans na swobodny wzrost pędu poza obwiednię)
   trunkKink?: number;            // Załamanie przewodnika w węźle (stopnie, domyślnie 3; iglaste 0)
   tipSpurs?: boolean;            // Drobne widełki na końcach najcieńszych witek (domyślnie tak)
   scaffoldLimbs?: number;        // Pokrój rozpierzchły (wiąz, kasztanowiec): przewodnik kończy się w nasadzie korony i rozpada na tyle konarów głównych, z których dopiero wychodzą gałęzie
@@ -259,4 +288,6 @@ export interface TreeSkeleton {
   leafSites?: number[];
   /** Promienie ciągłe między rzędami (model rur) — kreska bez mnożników rzędów, tylko wygładzenie i odziomek */
   uniformStroke?: boolean;
+  /** Pamięć podręczna wiatru: punkt zaczepienia każdego pędu na rodzicu (wyliczana leniwie, zależy tylko od topologii) */
+  windParents?: Array<{ pIdx: number; seg: number; u: number } | null>;
 }

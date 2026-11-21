@@ -8,7 +8,7 @@
 import type { SpeciesProfile, TreeSpecies, TrunkForm } from './types.js';
 import { SPECIES_PROFILES } from './speciesProfiles.js';
 import FITTED_PROFILES from './fittedProfiles.json' with { type: 'json' };
-import { profileAtHeight, type HeightAnchor } from './heightProfile.js';
+import { profileAtHeight, scaleProfileByHeight, type HeightAnchor } from './heightProfile.js';
 
 /** Wzorce alfabetu drzew z dopasowanym profilem (pole `ref` w `fittedProfiles.json`) */
 export type FittedTreeRef =
@@ -58,6 +58,41 @@ export function hasHeightScaling(kind: TreeKind): boolean {
   return !!FITTED.get(kind)?.heightAnchors?.length;
 }
 
+export interface TreeKindModelSource {
+  fitted: boolean;
+  multiHeightJson: boolean;
+  anchorHeights: number[];
+  modeLabel: string;
+}
+
+/** Opis źródła modelu i trybu ontogenezy dla rodzaju drzewa (do etykiet i raportów) */
+export function describeTreeKindModelSource(kind: TreeKind): TreeKindModelSource {
+  const fitted = FITTED.get(kind);
+  if (!fitted) {
+    return {
+      fitted: false,
+      multiHeightJson: false,
+      anchorHeights: [],
+      modeLabel: 'Profil bazowy + ontogeneza A',
+    };
+  }
+  const anchorHeights = (fitted.heightAnchors ?? []).map((a) => a.h).sort((a, b) => a - b);
+  if (anchorHeights.length > 0) {
+    return {
+      fitted: true,
+      multiHeightJson: true,
+      anchorHeights,
+      modeLabel: `Wielowysokościowy JSON (${anchorHeights.join('/')} m)`,
+    };
+  }
+  return {
+    fitted: true,
+    multiHeightJson: false,
+    anchorHeights: [],
+    modeLabel: 'Dopasowany JSON (1 wys.) + ontogeneza A',
+  };
+}
+
 const warnedUnknownKinds = new Set<string>();
 
 /** Nieznany rodzaj spada na dąb (zachowanie wsteczne), ale głośno: jedno ostrzeżenie na identyfikator */
@@ -69,17 +104,27 @@ function warnUnknownKind(kind: string): void {
 
 /**
  * Parametry generatora dla rodzaju; brak dopasowanego profilu → gatunek bazowy.
- * Rodzaj z węzłami wysokości dostaje profil dla `height` (bez wysokości: profil 9 m).
+ * Rodzaj z węzłami wysokości dostaje profil dla `height` (bez wysokości: profil 9 m);
+ * pozostałe z podaną wysokością dostają profil skalowany allometrycznie (Opcja A).
  */
 export function treeKindParams(kind: TreeKind, height?: number): TreeKindParams {
   const fitted = FITTED.get(kind);
   if (fitted) {
-    const profile = fitted.heightAnchors?.length ? profileAtHeight(fitted.heightAnchors, height ?? 9) : fitted.profile;
+    const profile = fitted.heightAnchors?.length
+      ? profileAtHeight(fitted.heightAnchors, height ?? 9)
+      : height !== undefined
+        ? scaleProfileByHeight(fitted.profile, height, 10)
+        : fitted.profile;
     return { species: fitted.startSpecies, profile, form: fitted.form ?? 'SINGLE' };
   }
   if (!(kind in SPECIES_PROFILES)) warnUnknownKind(kind);
   const baseSpecies = (kind in SPECIES_PROFILES ? kind : 'OAK') as TreeSpecies;
-  return { species: baseSpecies, profile: SPECIES_PROFILES[baseSpecies], form: 'SINGLE' };
+  const baseProfile = SPECIES_PROFILES[baseSpecies];
+  const profile =
+    height !== undefined
+      ? scaleProfileByHeight(baseProfile, height, baseSpecies === 'BUSH' ? 3 : 10)
+      : baseProfile;
+  return { species: baseSpecies, profile, form: 'SINGLE' };
 }
 
 /**

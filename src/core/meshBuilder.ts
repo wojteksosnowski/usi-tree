@@ -38,6 +38,45 @@ export class MeshBufferBuilder {
   indices = new GrowableBuffer(new Uint32Array(1 << 15), (n) => new Uint32Array(n));
   groups: { start: number; count: number; materialIndex: number }[] = [];
   vertexCount = 0;
+  /** Atrybut wiatru (vec3 na wierzchołek: ugięcie gałęzi, faza, trzepot liści); null = nie zbieramy (domyślnie) */
+  wind: GrowableBuffer<Float32Array> | null = null;
+  private windBaseX = 0;
+  private windBaseY = 0;
+  private windBaseZ = 0;
+  private windInvLen = 0;
+  private windW0 = 0;
+  private windSpan = 0;
+  private windPhase = 0;
+  private windFlutter = 0;
+
+  /** Włącza zbieranie atrybutu `windData` (wywołać przed dodaniem wierzchołków) */
+  enableWind() {
+    if (!this.wind) this.wind = new GrowableBuffer(new Float32Array(1 << 15), (n) => new Float32Array(n));
+  }
+
+  /**
+   * Tag wiatru dla kolejnych wierzchołków pędu: ugięcie rośnie liniowo od `w0` u nasady (x, y, z)
+   * do `w0 + span` w odległości `len` od niej. Faza rozsynchronizowuje gałęzie.
+   */
+  setWindStem(x: number, y: number, z: number, len: number, w0: number, span: number, phase: number) {
+    this.windBaseX = x;
+    this.windBaseY = y;
+    this.windBaseZ = z;
+    this.windInvLen = len > 1e-9 ? 1 / len : 0;
+    this.windW0 = w0;
+    this.windSpan = span;
+    this.windPhase = phase;
+    this.windFlutter = 0;
+  }
+
+  /** Tag wiatru dla listowia: stałe ugięcie jak najcieńszych gałązek, trzepot włączony */
+  setWindFoliage(weight: number) {
+    this.windInvLen = 0;
+    this.windW0 = weight;
+    this.windSpan = 0;
+    this.windPhase = 0;
+    this.windFlutter = 1;
+  }
 
   minX = Infinity;
   maxX = -Infinity;
@@ -52,6 +91,7 @@ export class MeshBufferBuilder {
     this.indices.length = 0;
     this.groups.length = 0;
     this.vertexCount = 0;
+    if (this.wind) this.wind.length = 0;
     this.minX = Infinity;
     this.maxX = -Infinity;
     this.minY = Infinity;
@@ -79,6 +119,14 @@ export class MeshBufferBuilder {
     this.positions.push3(x, y, z);
     this.normals.push3(nx, ny, nz);
     this.updateBounds(x, y, z);
+    if (this.wind) {
+      let t = 0;
+      if (this.windInvLen > 0) {
+        t = Math.hypot(x - this.windBaseX, y - this.windBaseY, z - this.windBaseZ) * this.windInvLen;
+        if (t > 1) t = 1;
+      }
+      this.wind.push3(this.windW0 + this.windSpan * t, this.windPhase, this.windFlutter);
+    }
     this.vertexCount++;
   }
 
@@ -103,6 +151,7 @@ export class MeshBufferBuilder {
           ? new Uint16Array(this.indices.a.subarray(0, this.indices.length))
           : this.indices.slice(),
       groups: this.groups.map((g) => ({ ...g })),
+      ...(this.wind ? { windData: this.wind.slice() } : {}),
       boundingBox: {
         min: [minX, minY, minZ],
         max: [maxX, maxY, maxZ],

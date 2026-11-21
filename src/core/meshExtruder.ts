@@ -53,9 +53,10 @@ export function strokeStem(
   stem: Stem,
   stroke: TreeStroke,
   nominalHeight: number,
-  trunkBaseR: number
+  trunkBaseR: number,
+  twigStroke = 1
 ): Stem {
-  const k = stroke.levelScale[Math.min(stem.level, stroke.levelScale.length - 1)] ?? 1;
+  const k = (stroke.levelScale[Math.min(stem.level, stroke.levelScale.length - 1)] ?? 1) * (stem.level >= 2 ? twigStroke : 1);
   const n = stem.r.length;
   const cap = trunkBaseR * STROKE_LEVEL_CAP[Math.min(stem.level, STROKE_LEVEL_CAP.length - 1)];
   const r = stem.r.map((v) => softCap(v * k, cap));
@@ -78,6 +79,57 @@ export function strokeStem(
     }
   }
   return { ...stem, r };
+}
+
+/** Oblicza równolegle transportowaną ramkę [dx, dy, dz, sx, sy, sz, ux, uy, uz] dla pierścienia q */
+function advanceTransportFrame(
+  stem: Stem,
+  rings: readonly number[],
+  q: number,
+  frame: Float64Array,
+  hasSide: boolean
+): void {
+  const a = rings[Math.max(0, q - 1)],
+    b = rings[Math.min(rings.length - 1, q + 1)];
+  let dx = stem.px[b] - stem.px[a],
+    dy = stem.py[b] - stem.py[a],
+    dz = stem.pz[b] - stem.pz[a];
+  const dl = Math.hypot(dx, dy, dz) || 1;
+  dx /= dl;
+  dy /= dl;
+  dz /= dl;
+  let sx = frame[3],
+    sy = frame[4],
+    sz = frame[5];
+  if (!hasSide) {
+    if (Math.abs(dy) < 0.9) {
+      sx = -dz;
+      sy = 0;
+      sz = dx;
+    } else {
+      sx = 0;
+      sy = dz;
+      sz = -dy;
+    }
+  } else {
+    const dot = sx * dx + sy * dy + sz * dz;
+    sx -= dx * dot;
+    sy -= dy * dot;
+    sz -= dz * dot;
+  }
+  const sl = Math.hypot(sx, sy, sz) || 1;
+  sx /= sl;
+  sy /= sl;
+  sz /= sl;
+  frame[0] = dx;
+  frame[1] = dy;
+  frame[2] = dz;
+  frame[3] = sx;
+  frame[4] = sy;
+  frame[5] = sz;
+  frame[6] = dy * sz - dz * sy;
+  frame[7] = dz * sx - dx * sz;
+  frame[8] = dx * sy - dy * sx;
 }
 
 /**
@@ -108,48 +160,21 @@ export function extrudeStem(
     for (let i = 0; i < n - 1; i += ringStride) rings.push(i);
     rings.push(n - 1);
   }
-  let sx = 0,
-    sy = 0,
-    sz = 0,
-    hasSide = false;
+  const frame = new Float64Array(9);
+  let hasSide = false;
   let prevRingStart = -1;
 
   const ringCount = end === 'spike' ? rings.length - 1 : rings.length;
   for (let q = 0; q < ringCount; q++) {
     const i = rings[q];
-    const a = rings[Math.max(0, q - 1)],
-      b = rings[Math.min(rings.length - 1, q + 1)];
-    let dx = stem.px[b] - stem.px[a],
-      dy = stem.py[b] - stem.py[a],
-      dz = stem.pz[b] - stem.pz[a];
-    const dl = Math.hypot(dx, dy, dz) || 1;
-    dx /= dl;
-    dy /= dl;
-    dz /= dl;
-    if (!hasSide) {
-      if (Math.abs(dy) < 0.9) {
-        sx = -dz;
-        sy = 0;
-        sz = dx;
-      } else {
-        sx = 0;
-        sy = dz;
-        sz = -dy;
-      }
-      hasSide = true;
-    } else {
-      const dot = sx * dx + sy * dy + sz * dz;
-      sx -= dx * dot;
-      sy -= dy * dot;
-      sz -= dz * dot;
-    }
-    const sl = Math.hypot(sx, sy, sz) || 1;
-    sx /= sl;
-    sy /= sl;
-    sz /= sl;
-    const ux = dy * sz - dz * sy,
-      uy = dz * sx - dx * sz,
-      uz = dx * sy - dy * sx;
+    advanceTransportFrame(stem, rings, q, frame, hasSide);
+    hasSide = true;
+    const sx = frame[3],
+      sy = frame[4],
+      sz = frame[5],
+      ux = frame[6],
+      uy = frame[7],
+      uz = frame[8];
     const cx = stem.px[i] * scale,
       cy = stem.py[i] * scale,
       cz = stem.pz[i] * scale;
@@ -182,6 +207,84 @@ export function extrudeStem(
   builder.addVertex(stem.px[last] * scale, stem.py[last] * scale, stem.pz[last] * scale, 0, 1, 0);
   for (let j = 0; j < sides; j++) {
     builder.indices.push3(prevRingStart + j, tip, prevRingStart + ((j + 1) % sides));
+  }
+}
+
+/**
+ * Wytłacza cienki pęd (L3+) jako 2-wierzchołkową wstęgę skręcaną naprzemiennie o ±45° w płaszczyźnie (sx, ux),
+ * zakończoną pojedynczym wierzchołkiem szpica (`spike`). Naprzemienna faza ±45° daje 90° skręt normalnej
+ * między kolejnymi pierścieniami bez przewężenia (bowtie) i utrzymuje witki czytelne pod każdym kątem w 3D.
+ */
+export function extrudeRibbonStem(
+  stem: Stem,
+  scale: number,
+  jitter: number,
+  prng: FastPrng,
+  builder: MeshBufferBuilder,
+  rings: readonly number[],
+  stemIdx = 0,
+  doubleFace = false
+) {
+  if (rings.length < 2) return;
+  const ringCount = rings.length - 1;
+  const flipSign = (stemIdx & 1) === 0 ? 1 : -1;
+  const frame = new Float64Array(9);
+  let hasSide = false;
+  let prevRingStart = -1;
+
+  for (let q = 0; q < ringCount; q++) {
+    const i = rings[q];
+    advanceTransportFrame(stem, rings, q, frame, hasSide);
+    hasSide = true;
+    const sx = frame[3],
+      sy = frame[4],
+      sz = frame[5],
+      ux = frame[6],
+      uy = frame[7],
+      uz = frame[8];
+
+    const phase = flipSign * ((q & 1) === 0 ? Math.PI * 0.25 : -Math.PI * 0.25);
+    const cosP = Math.cos(phase);
+    const sinP = Math.sin(phase);
+
+    const rx = sx * cosP + ux * sinP;
+    const ry = sy * cosP + uy * sinP;
+    const rz = sz * cosP + uz * sinP;
+
+    const nx = -sx * sinP + ux * cosP;
+    const ny = -sy * sinP + uy * cosP;
+    const nz = -sz * sinP + uz * cosP;
+
+    const cx = stem.px[i] * scale;
+    const cy = stem.py[i] * scale;
+    const cz = stem.pz[i] * scale;
+    const r = stem.r[i] * scale;
+
+    const rr0 = jitter > 0 ? r * (1 + prng.signedRange(jitter)) : r;
+    const rr1 = jitter > 0 ? r * (1 + prng.signedRange(jitter)) : r;
+
+    const ringStart = builder.vertexCount;
+    builder.addVertex(cx + rx * rr0, cy + ry * rr0, cz + rz * rr0, nx, ny, nz);
+    builder.addVertex(cx - rx * rr1, cy - ry * rr1, cz - rz * rr1, nx, ny, nz);
+
+    if (prevRingStart >= 0) {
+      builder.indices.push3(prevRingStart, ringStart + 1, prevRingStart + 1);
+      builder.indices.push3(prevRingStart, ringStart, ringStart + 1);
+      if (doubleFace) {
+        builder.indices.push3(prevRingStart, prevRingStart + 1, ringStart + 1);
+        builder.indices.push3(prevRingStart, ringStart + 1, ringStart);
+      }
+    }
+    prevRingStart = ringStart;
+  }
+
+  if (prevRingStart < 0) return;
+  const last = rings[rings.length - 1];
+  const tip = builder.vertexCount;
+  builder.addVertex(stem.px[last] * scale, stem.py[last] * scale, stem.pz[last] * scale, 0, 1, 0);
+  builder.indices.push3(prevRingStart, tip, prevRingStart + 1);
+  if (doubleFace) {
+    builder.indices.push3(prevRingStart, prevRingStart + 1, tip);
   }
 }
 
@@ -235,13 +338,19 @@ export function addLeaves(
   prng: FastPrng,
   builder: MeshBufferBuilder,
   startIndex: number,
-  leafSites?: number[]
+  leafSites?: number[],
+  wind?: { strength: number; dirX?: number; dirZ?: number; time?: number }
 ) {
   const deepest = profile.levels.length;
   const aspect = profile.leafAspect ?? 0.55;
   const clump = profile.leafClump ?? 4;
   const density = profile.leafDensity ?? DEFAULT_LEAF_DENSITY;
   const L = profile.leafSizeRatio;
+  const outline = profile.leafOutline?.length ? profile.leafOutline : LEAF_OUTLINES[profile.leafShape ?? 'hex'];
+  const corners = outline.length / 2;
+  const petioleLen = profile.petioleLengthRatio ?? 0.15;
+  const petiolePliancy = profile.petiolePliancy ?? 0;
+  const flatness = Math.max(0, Math.min(1, profile.leafFlatness ?? 0));
 
   const sites: number[] = [];
   let minY = Infinity,
@@ -321,31 +430,77 @@ export function addLeaves(
       tx /= tl;
       ty /= tl;
       tz /= tl;
-      const nLeaves = Math.max(1, Math.round(clump * (0.6 + prng.next() * 0.8)));
+      const sitePrng = new FastPrng(((i + 1) * 0x9e3779b9) ^ 0x85ebca6b);
+      const nLeaves = Math.max(1, Math.round(clump * (0.6 + sitePrng.next() * 0.8)));
       for (let q = 0; q < nLeaves; q++) {
-        const size = L * (0.6 + prng.next() * 0.8);
+        const size = L * (0.6 + sitePrng.next() * 0.8);
         splitDir(
           tx,
           ty,
           tz,
-          prng.range(0, Math.PI * 2),
-          (25 + prng.next() * 55) * DEG,
+          sitePrng.range(0, Math.PI * 2),
+          (25 + sitePrng.next() * 55 * (1 - flatness * 0.85)) * DEG,
           tmpVecA
         );
+        const petioleLever = (0.35 + 2.8 * petioleLen) * petiolePliancy;
+        if (petioleLever > 0) {
+          tmpVecA[1] -= petioleLever * 1.6;
+        }
+        if (wind && wind.strength > 0) {
+          const wdl = Math.hypot(wind.dirX ?? 1, wind.dirZ ?? 0) || 1;
+          const wx = (wind.dirX ?? 1) / wdl;
+          const wz = (wind.dirZ ?? 0) / wdl;
+          const s = wind.strength;
+          const petioleFlex = (0.3 + 1.8 * petiolePliancy) * (0.45 + 2.4 * petioleLen);
+          const wSteady = s * (0.55 + 1.5 * petioleFlex);
+          const phase = (wind.time ?? 0) * (2.4 + 3.2 * s) - (sx * wx + sz * wz) * 3.5 + i * 0.4 + q * 0.8;
+          const wOsc = wind.time !== undefined
+            ? (0.18 * s + 0.95 * s * s) * (0.4 + 1.5 * petioleFlex) * (Math.sin(phase) + 0.35 * Math.sin(phase * 2.1 + 0.7))
+            : 0;
+          const wAmt = wSteady + wOsc;
+          tmpVecA[0] += wx * wAmt;
+          tmpVecA[1] -= wAmt * 0.25;
+          tmpVecA[2] += wz * wAmt;
+        }
+        if (petioleLever > 0 || (wind && wind.strength > 0)) {
+          const al = Math.hypot(tmpVecA[0], tmpVecA[1], tmpVecA[2]) || 1;
+          tmpVecA[0] /= al;
+          tmpVecA[1] /= al;
+          tmpVecA[2] /= al;
+        }
         const [ax, ay, az] = tmpVecA;
-        splitDir(ax, ay, az, prng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
-        const [bx, by, bz] = tmpVecB;
-        const nx = ay * bz - az * by,
+        splitDir(ax, ay, az, sitePrng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
+        if (flatness > 0) {
+          tmpVecB[1] *= 1 - flatness * 0.85;
+          const dot = tmpVecB[0] * ax + tmpVecB[1] * ay + tmpVecB[2] * az;
+          tmpVecB[0] -= dot * ax;
+          tmpVecB[1] -= dot * ay;
+          tmpVecB[2] -= dot * az;
+          const bl = Math.hypot(tmpVecB[0], tmpVecB[1], tmpVecB[2]) || 1;
+          tmpVecB[0] /= bl;
+          tmpVecB[1] /= bl;
+          tmpVecB[2] /= bl;
+        }
+        let [bx, by, bz] = tmpVecB;
+        let nx = ay * bz - az * by,
           ny = az * bx - ax * bz,
           nz = ax * by - ay * bx;
-        const ox = sx + ax * size * 0.15,
-          oy = sy + ay * size * 0.15,
-          oz = sz + az * size * 0.15;
+        if (flatness > 0 && ny < 0) {
+          bx = -bx;
+          by = -by;
+          bz = -bz;
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
+        const ox = sx + ax * size * petioleLen,
+          oy = sy + ay * size * petioleLen,
+          oz = sz + az * size * petioleLen;
         const w = size * aspect * 0.5;
         const v0 = builder.vertexCount;
-        for (let p = 0; p < 6; p++) {
-          const along = LEAF_HEX[p * 2] * size,
-            across = LEAF_HEX[p * 2 + 1] * w;
+        for (let p = 0; p < corners; p++) {
+          const along = outline[p * 2] * size,
+            across = outline[p * 2 + 1] * w;
           builder.addVertex(
             (ox + ax * along + bx * across) * scale,
             (oy + ay * along + by * across) * scale,
@@ -355,7 +510,7 @@ export function addLeaves(
             nz
           );
         }
-        for (let p = 1; p < 5; p++) builder.indices.push3(v0, v0 + p, v0 + p + 1);
+        for (let p = 1; p < corners - 1; p++) builder.indices.push3(v0, v0 + p, v0 + p + 1);
       }
     }
     builder.addGroup(groupStart, builder.indices.length - groupStart, b + 1);
@@ -371,8 +526,8 @@ export function addLeaves(
 const LEAF_PENTA = [0, 0, 0.3, 1.03, 0.9, 0.64, 0.9, -0.64, 0.3, -1.03] as const;
 /** Latawiec liścia (2 trójkąty) o polu i długości sześciokąta `LEAF_HEX`, najszerszy tam, gdzie on */
 const LEAF_QUAD = [0, 0, 0.42, 1.25, 1.05, 0, 0.42, -1.25] as const;
-/** Trójkąt liścia (1 trójkąt) o polu i środku ciężkości sześciokąta `LEAF_HEX` (poza presetami: czyta się jak kolec) */
-const LEAF_TRI = [0.1, 1.04, 1.36, 0, 0.1, -1.04] as const;
+/** Trójkąt liścia (1 trójkąt) przyczepiony wierzchołkiem w (0, 0) */
+const LEAF_TRI = [0, 0, 1.0, 1.0, 1.0, -1.0] as const;
 const LEAF_OUTLINES = { hex: LEAF_HEX, penta: LEAF_PENTA, quad: LEAF_QUAD, tri: LEAF_TRI } as const;
 type LeafShape = keyof typeof LEAF_OUTLINES;
 
@@ -659,6 +814,12 @@ export function isFullLeafLod(lod: TreeMeshLod): boolean {
 /** Pułap powiększenia liścia względem liścia profilu: poziomy dalsze zachowują kształt (żadnych kolców) */
 export const MAX_LEAF_SIZE_SCALE = 1.5;
 
+/**
+ * Pułap powiększenia dla poziomów z twardym budżetem `maxLeaves`: budżet wygrywa z pokryciem, a większe liście
+ * oddają część pola (wydłużenie nadal ograniczone `ENLARGED_MAX_LENGTH_SCALE`, dalej liść tylko szerzeje).
+ */
+export const MAX_LEAF_SIZE_SCALE_BUDGET = 2;
+
 /** Od tego powiększenia liść jest pilnowany przed wystawaniem (przesuwany ku wnętrzu korony) */
 const ENLARGED_FROM_SCALE = 1.15;
 
@@ -697,15 +858,22 @@ export function selectLeafSites(
   const share = (c: number, k: number) => (c / Math.max(1, full)) * (k / Math.max(1, baseClump));
   // Pułap powiększenia: zamiast powiększać liść ponad MAX_LEAF_SIZE_SCALE zostawiamy więcej miejsc, potem większą kępkę.
   // Bryła korony (crownShell) ma własną, małą liczbę płatów — tam pułap tylko obcina powiększenie.
-  if (!lod.crownShell && leafScale / Math.sqrt(Math.max(1e-6, share(count, clump))) > MAX_LEAF_SIZE_SCALE) {
-    const need = (leafScale / MAX_LEAF_SIZE_SCALE) ** 2 * Math.max(0, Math.min(1, lod.leafCoverage ?? 1));
+  const sizeCap = lod.maxLeaves !== undefined && !lod.crownShell ? MAX_LEAF_SIZE_SCALE_BUDGET : MAX_LEAF_SIZE_SCALE;
+  if (!lod.crownShell && leafScale / Math.sqrt(Math.max(1e-6, share(count, clump))) > sizeCap) {
+    const need = (leafScale / sizeCap) ** 2 * Math.max(0, Math.min(1, lod.leafCoverage ?? 1));
     count = Math.max(count, Math.min(field.count, Math.ceil((need * Math.max(1, full) * Math.max(1, baseClump)) / clump)));
     if (share(count, clump) < need) {
       clump = Math.min(baseClump, Math.max(clump, Math.ceil((need * Math.max(1, full) * Math.max(1, baseClump)) / Math.max(1, count))));
     }
   }
+  // Twardy budżet i nigdy więcej miejsc niż poziom bliski (dobór pokrycia może sięgnąć po miejsca spoza `baseKeep`)
+  if (lod.maxLeaves !== undefined && !lod.crownShell) count = Math.min(count, Math.max(1, Math.round(full)));
+  if (lod.maxLeaves !== undefined && !lod.crownShell && count * clump > lod.maxLeaves) {
+    count = Math.max(1, Math.min(count, Math.floor(lod.maxLeaves / clump)));
+    if (count * clump > lod.maxLeaves) clump = Math.max(1, Math.floor(lod.maxLeaves / count));
+  }
   const areaShare = share(count, clump);
-  const sizeScale = Math.min(MAX_LEAF_SIZE_SCALE, leafScale / Math.sqrt(Math.max(1e-6, areaShare)));
+  const sizeScale = Math.min(sizeCap, leafScale / Math.sqrt(Math.max(1e-6, areaShare)));
   return { count, clump, sizeScale, enlarged: sizeScale > ENLARGED_FROM_SCALE };
 }
 
@@ -781,8 +949,11 @@ function leafEmitter(
       tone[i] = shade > 0.62 ? 0 : shade > 0.36 ? 1 : 2;
     }
   }
-  const outline = LEAF_OUTLINES[shape];
+  const outline = profile.leafOutline?.length ? profile.leafOutline : LEAF_OUTLINES[profile.leafShape ?? shape];
   const corners = outline.length / 2;
+  const petioleLen = profile.petioleLengthRatio ?? 0.15;
+  const petiolePliancy = profile.petiolePliancy ?? 0;
+  const flatness = Math.max(0, Math.min(1, profile.leafFlatness ?? 0));
   const enlarged = sel.enlarged;
   const baseAspect = profile.leafAspect ?? 0.55;
   // Powiększony liść wydłuża się najwyżej ENLARGED_MAX_LENGTH_SCALE×, resztę pola (stałe pokrycie korony) bierze szerokość
@@ -825,7 +996,7 @@ function leafEmitter(
       tz /= tl;
       const nLeaves = Math.max(1, Math.round(sel.clump * (0.6 + prng.next() * 0.8)));
       if (enlarged) {
-        splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan) * DEG, baseA);
+        splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan * (1 - flatness * 0.85)) * DEG, baseA);
         baseRoll = prng.range(0, Math.PI * 2);
       }
       for (let q = 0; q < nLeaves; q++) {
@@ -833,21 +1004,48 @@ function leafEmitter(
         if (enlarged) {
           // Kępka powiększonych liści: wspólna oś z małym rozrzutem kąta i wspólny obrót, liście kolejno wzdłuż pędu
           // (zwarta masa jak w oryginale, nie rozetka wokół jednej nasady)
-          splitDir(baseA[0], baseA[1], baseA[2], prng.range(0, Math.PI * 2), prng.next() * CLUMP_SPREAD_DEG * DEG, tmpVecA);
-          splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], baseRoll + (prng.next() - 0.5) * 0.8, Math.PI / 2, tmpVecB);
+          splitDir(baseA[0], baseA[1], baseA[2], prng.range(0, Math.PI * 2), prng.next() * CLUMP_SPREAD_DEG * (1 - flatness * 0.85) * DEG, tmpVecA);
+          splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], baseRoll + (prng.next() - 0.5) * 0.8 * (1 - flatness * 0.85), Math.PI / 2, tmpVecB);
         } else {
-          splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan) * DEG, tmpVecA);
+          splitDir(tx, ty, tz, prng.range(0, Math.PI * 2), (25 + prng.next() * tiltSpan * (1 - flatness * 0.85)) * DEG, tmpVecA);
+          splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], prng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
+        }
+        if (petiolePliancy > 0) {
+          tmpVecA[1] -= petiolePliancy * 0.9;
+          const al = Math.hypot(tmpVecA[0], tmpVecA[1], tmpVecA[2]) || 1;
+          tmpVecA[0] /= al;
+          tmpVecA[1] /= al;
+          tmpVecA[2] /= al;
           splitDir(tmpVecA[0], tmpVecA[1], tmpVecA[2], prng.range(0, Math.PI * 2), Math.PI / 2, tmpVecB);
         }
         const [ax, ay, az] = tmpVecA;
-        const [bx, by, bz] = tmpVecB;
-        const nx = ay * bz - az * by,
+        if (flatness > 0) {
+          tmpVecB[1] *= 1 - flatness * 0.85;
+          const dot = tmpVecB[0] * ax + tmpVecB[1] * ay + tmpVecB[2] * az;
+          tmpVecB[0] -= dot * ax;
+          tmpVecB[1] -= dot * ay;
+          tmpVecB[2] -= dot * az;
+          const bl = Math.hypot(tmpVecB[0], tmpVecB[1], tmpVecB[2]) || 1;
+          tmpVecB[0] /= bl;
+          tmpVecB[1] /= bl;
+          tmpVecB[2] /= bl;
+        }
+        let [bx, by, bz] = tmpVecB;
+        let nx = ay * bz - az * by,
           ny = az * bx - ax * bz,
           nz = ax * by - ay * bx;
+        if (flatness > 0 && ny < 0) {
+          bx = -bx;
+          by = -by;
+          bz = -bz;
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
         const along0 = enlarged ? (q - (nLeaves - 1) / 2) * size * CLUMP_STEP : 0;
-        const ox = sx + ax * size * rootShift + tx * along0,
-          oy = sy + ay * size * rootShift + ty * along0,
-          oz = sz + az * size * rootShift + tz * along0;
+        const ox = sx + ax * size * (enlarged ? rootShift : petioleLen) + tx * along0,
+          oy = sy + ay * size * (enlarged ? rootShift : petioleLen) + ty * along0,
+          oz = sz + az * size * (enlarged ? rootShift : petioleLen) + tz * along0;
         const w = size * aspect * 0.5;
         let far = 0,
           farX = 0,

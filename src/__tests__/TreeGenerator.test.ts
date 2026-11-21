@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { TreeGenerator, TreeSpecies, SPECIES_PROFILES, TIDY_STRUCTURE, type TreeSkeleton, type BranchLevelParams } from '../three/index.js';
+import { TreeGenerator, TreeSpecies, SPECIES_PROFILES, TIDY_STRUCTURE, FastPrng, type TreeSkeleton, type BranchLevelParams } from '../three/index.js';
+import { extrudeRibbonStem } from '../core/meshExtruder.js';
+import { MeshBufferBuilder } from '../core/meshBuilder.js';
 
 describe('TreeGenerator', () => {
   const ALL_SPECIES: TreeSpecies[] = ['OAK', 'BIRCH', 'PINE', 'SPRUCE', 'POPLAR', 'WILLOW', 'ASH', 'ASPEN', 'BUSH'];
@@ -251,6 +253,62 @@ describe('TreeGenerator', () => {
       const base = TreeGenerator.buildSkeleton({ species: 'BIRCH', height: 12, seed: 5 });
       expect(a.stems.map((s) => s.pz.join())).toEqual(b.stems.map((s) => s.pz.join()));
       expect(a.stems.map((s) => s.pz.join())).not.toEqual(base.stems.map((s) => s.pz.join()));
+    });
+  });
+
+  describe('progressive branch triangle reduction (Scheme B/C)', () => {
+    it('extrudeRibbonStem builds 2-vertex twisted ribbon with spike tip (single & double-sided)', () => {
+      const stem = {
+        level: 3,
+        px: [0, 0.2, 0.5, 0.9],
+        py: [0, 0.3, 0.7, 1.0],
+        pz: [0, 0.1, -0.1, 0.0],
+        r: [0.05, 0.04, 0.025, 0.01],
+        length: 1.2,
+        clipped: false,
+      };
+      const rings = [0, 1, 2, 3]; // 3 bands -> 2 bands + 1 spike tip
+
+      const bSingle = new MeshBufferBuilder();
+      extrudeRibbonStem(stem, 10, 0.05, new FastPrng(42), bSingle, rings, 0, false);
+      const rawSingle = bSingle.buildRawMesh();
+      // 3 non-tip rings * 2 verts + 1 tip vert = 7 verts; 2 bands * 2 tris + 1 tip tri = 5 tris
+      expect(rawSingle.positions.length / 3).toBe(7);
+      expect(rawSingle.indices.length / 3).toBe(5);
+
+      const bDouble = new MeshBufferBuilder();
+      extrudeRibbonStem(stem, 10, 0.05, new FastPrng(42), bDouble, rings, 1, true);
+      const rawDouble = bDouble.buildRawMesh();
+      expect(rawDouble.positions.length / 3).toBe(7);
+      expect(rawDouble.indices.length / 3).toBe(10);
+
+      // 2-point twig -> 1 tri (single) / 2 tris (double)
+      const bTip = new MeshBufferBuilder();
+      extrudeRibbonStem(stem, 10, 0, new FastPrng(1), bTip, [0, 3], 0, false);
+      expect(bTip.buildRawMesh().indices.length / 3).toBe(1);
+    });
+
+    it('HIGH > MEDIUM > LOW holds strictly across all species including 2-level SPRUCE and ASPEN', () => {
+      for (const species of ALL_SPECIES) {
+        const sk = TreeGenerator.buildSkeleton({ species, height: 12.0, seed: 42 });
+        const tris = (['HIGH', 'MEDIUM', 'LOW'] as const).map(
+          (detail) => TreeGenerator.meshSkeletonRaw(sk, { detail }).mesh.indices.length / 3
+        );
+        expect(tris[1], `${species}: MEDIUM < HIGH`).toBeLessThan(tris[0]);
+        expect(tris[2], `${species}: LOW < MEDIUM`).toBeLessThan(tris[1]);
+      }
+    });
+
+    it('doubleSidedTwigs emits explicit Front+Back faces on L3+ twigs (Scheme C > Scheme B)', () => {
+      const sk = TreeGenerator.buildSkeleton({ species: 'OAK', height: 12.0, seed: 42 });
+      const bHigh = TreeGenerator.meshSkeletonRaw(sk, { detail: 'HIGH', doubleSidedTwigs: false }).mesh.indices.length / 3;
+      const cHigh = TreeGenerator.meshSkeletonRaw(sk, { detail: 'HIGH', doubleSidedTwigs: true }).mesh.indices.length / 3;
+      expect(cHigh).toBeGreaterThan(bHigh);
+
+      // LOW drops L3+, so doubleSidedTwigs does not inflate LOW for 3-level OAK
+      const bLow = TreeGenerator.meshSkeletonRaw(sk, { detail: 'LOW', doubleSidedTwigs: false }).mesh.indices.length / 3;
+      const cLow = TreeGenerator.meshSkeletonRaw(sk, { detail: 'LOW', doubleSidedTwigs: true }).mesh.indices.length / 3;
+      expect(cLow).toBe(bLow);
     });
   });
 });
