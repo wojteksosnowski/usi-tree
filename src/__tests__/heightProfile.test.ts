@@ -11,6 +11,7 @@ import {
 } from '../core/heightProfile.js';
 import { describeTreeKindModelSource, treeKindParams } from '../core/treeSpeciesRegistry.js';
 import { SPECIES_PROFILES } from '../core/speciesProfiles.js';
+import { crownRatio } from '../core/crownEnvelope.js';
 
 const entries = (FITTED as unknown as { ref: string; startSpecies: TreeSpecies; heightAnchors?: HeightAnchor[] }[]).filter((f) => f.heightAnchors);
 
@@ -221,5 +222,87 @@ describe('taperShape: interpolacja bez przełączania modelu', () => {
     const v = [8, 12, 15, 20].map((h) => profileAtHeight(A as any, h).taperShape as number);
     for (let i = 1; i < v.length; i++) expect(v[i]).toBeGreaterThan(v[i - 1]);
     expect(v[2]).toBeCloseTo(0.5, 1);
+  });
+});
+
+describe('kontynuacja krzywej powyżej 24 m (h > 24)', () => {
+  it('dla h = 28, 30 parametry liniowe podążają za fitParameterCurve(pts).eval(h) i nie zatrzymują się na 24 m', () => {
+    const lo = { trunkHeightRatio: 0.2, levels: [{ count: 10, downAngle: 40 }] } as unknown as SpeciesProfile;
+    const hi = { trunkHeightRatio: 0.3, levels: [{ count: 20, downAngle: 60 }] } as unknown as SpeciesProfile;
+    const A = [{ h: 6, profile: lo }, { h: 24, profile: hi }];
+    const fitRatio = fitParameterCurve([{ h: 6, y: 0.2 }, { h: 24, y: 0.3 }]);
+    const fitAngle = fitParameterCurve([{ h: 6, y: 40 }, { h: 24, y: 60 }]);
+
+    for (const h of [28, 30]) {
+      const p = profileAtHeight(A, h);
+      expect(p.trunkHeightRatio).toBeCloseTo(fitRatio.eval(h), 6);
+      expect(p.trunkHeightRatio).toBeGreaterThan(0.3);
+      expect(p.levels[0].downAngle).toBeCloseTo(fitAngle.eval(h), 6);
+      expect(p.levels[0].downAngle).toBeGreaterThan(60);
+    }
+  });
+
+  it('PINE flareFactor powyżej 24 m (h = 28, 30) podąża za krzywą zamiast zatrzymywać się na 24 m', () => {
+    const pine = entries.find((e) => e.ref === 'PINE')!;
+    const A = pine.heightAnchors!;
+    const pts = A.map((a) => ({ h: a.h, y: a.profile.flareFactor ?? 1.12 }));
+    const fit = fitParameterCurve(pts);
+    const at24 = profileAtHeight(A, 24).flareFactor!;
+
+    for (const h of [28, 30]) {
+      const val = profileAtHeight(A, h).flareFactor!;
+      expect(val).toBeCloseTo(Math.max(0, Math.min(5, fit.eval(h))), 6);
+      expect(val).not.toBeCloseTo(at24, 4);
+    }
+  });
+
+  it('PINE trunkHeightRatio/leafSizeRatio oraz OAK crownPeak dla h = 24, 28, 30 równają się fit.eval(h) bez przycinania i generują poprawne drzewa (stems.length > 10)', () => {
+    const pine = entries.find((e) => e.ref === 'PINE')!;
+    const pineA = pine.heightAnchors!;
+    const fitPineTrunk = fitParameterCurve(pineA.map((a) => ({ h: a.h, y: a.profile.trunkHeightRatio })));
+    const fitPineLeaf = fitParameterCurve(pineA.map((a) => ({ h: a.h, y: a.profile.leafSizeRatio })));
+
+    const oak = entries.find((e) => e.ref === 'OAK')!;
+    const oakA = oak.heightAnchors!;
+
+    for (const h of [24, 28, 30]) {
+      const pPine = profileAtHeight(pineA, h);
+      expect(pPine.trunkHeightRatio).toBeCloseTo(fitPineTrunk.eval(h), 6);
+      expect(pPine.leafSizeRatio).toBeCloseTo(fitPineLeaf.eval(h), 6);
+      const skPine = TreeGenerator.buildSkeleton({ species: 'PINE', height: h, seed: 11, profile: pPine });
+      expect(skPine.stems.length).toBeGreaterThan(10);
+
+      const pOak = profileAtHeight(oakA, h);
+      expect(pOak.crownPeak).toBeLessThan(0.05);
+      const skOak = TreeGenerator.buildSkeleton({ species: 'OAK', height: h, seed: 11, profile: pOak });
+      expect(skOak.stems.length).toBeGreaterThan(10);
+    }
+  });
+});
+
+describe('interpolacja crownShape (Wariant A: crownShapeB + crownShapeBlend)', () => {
+  it('PINE między 6 m (CONICAL) a 9 m (UMBRELLA) płynnie miesza obwiednię', () => {
+    const pine = entries.find((e) => e.ref === 'PINE')!;
+    const A = pine.heightAnchors!;
+
+    const p6 = profileAtHeight(A, 6);
+    expect(p6.crownShape).toBe('CONICAL');
+    expect(p6.crownShapeB).toBeUndefined();
+    expect(p6.crownShapeBlend).toBeUndefined();
+
+    const p75 = profileAtHeight(A, 7.5);
+    expect(p75.crownShape).toBe('CONICAL');
+    expect(p75.crownShapeB).toBe('UMBRELLA');
+    expect(p75.crownShapeBlend).toBeCloseTo(0.5, 6);
+
+    for (const t of [0.2, 0.5, 0.8]) {
+      const expected = 0.5 * crownRatio('CONICAL', t, p75.crownPeak) + 0.5 * crownRatio('UMBRELLA', t, p75.crownPeak);
+      expect(crownRatio(p75.crownShape, t, p75.crownPeak, p75.crownShapeB, p75.crownShapeBlend)).toBeCloseTo(expected, 6);
+    }
+
+    const p9 = profileAtHeight(A, 9);
+    expect(p9.crownShape).toBe('UMBRELLA');
+    expect(p9.crownShapeB).toBeUndefined();
+    expect(p9.crownShapeBlend).toBeUndefined();
   });
 });

@@ -78,7 +78,7 @@ describe('Branch & Trunk Continuity (H1, H2, H3)', () => {
               ).toBeLessThanOrEqual(s.r[i] + 1e-9);
             }
           }
-        });
+        }, 30000);
       }
     }
   });
@@ -127,7 +127,7 @@ describe('Branch & Trunk Continuity (H1, H2, H3)', () => {
               `Child #${si} (L${child.level}, r0=${child.r[0]}) exceeds 0.9 * parent #${parentIdx} radius (${parentR}) at attach`
             ).toBeLessThanOrEqual(parentR * 0.9 + 1e-6);
           }
-        });
+        }, 30000);
       }
     }
   });

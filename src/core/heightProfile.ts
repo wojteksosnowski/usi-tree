@@ -159,18 +159,27 @@ function evalBraked(f: (h: number) => number, h0: number, hN: number, h: number)
     const slope0 = (f(h0 + eps) - f(h0)) / eps;
     return f(h0) - slope0 * (h0 - h);
   }
-  if (h <= hN) return f(h);
-  const slope = (f(hN) - f(hN - eps)) / eps;
-  return f(hN) + slope * hN * Math.log(h / hN);
+  return f(h);
+}
+
+/**
+ * Ewaluuje dopasowaną krzywą parametru dla wysokości `h` (wraz z liniową styczną poniżej `h0`,
+ * przycięciem do `[min, max]` z `paramSpec` i ewentualnym zaokrągleniem dla parametrów całkowitych).
+ */
+export function evalParameterCurve(fit: CurveFitResult, h: number, key = ''): number {
+  const { min, max, integer } = paramRange(key);
+  const h0 = fit.points.length > 0 ? fit.points[0].h : h;
+  const hN = fit.points.length > 0 ? fit.points[fit.points.length - 1].h : h;
+  const raw = h > 0 ? fit.eval(h) : evalBraked(fit.eval, h0, hN, h);
+  let v = Math.min(max, Math.max(min, raw));
+  if (integer) v = Math.max(Math.max(0, min), Math.round(v));
+  return v;
 }
 
 function evalAtNodes(nodes: unknown[], hs: number[], h: number, nearIdx: number, key: string): unknown {
   if (nodes.every((v) => typeof v === 'number')) {
     const pts = (nodes as number[]).map((y, i) => ({ h: hs[i], y }));
-    const { min, max, integer } = paramRange(key);
-    let v = Math.min(max, Math.max(min, evalBraked(fitParameterCurve(pts).eval, hs[0], hs[hs.length - 1], h)));
-    if (integer) v = Math.max(Math.max(0, min), Math.round(v));
-    return v;
+    return evalParameterCurve(fitParameterCurve(pts), h, key);
   }
   if (nodes.every((v) => Array.isArray(v))) {
     const arrays = nodes as unknown[][];
@@ -220,7 +229,35 @@ export function profileAtHeight(anchors: readonly HeightAnchor[], h: number): Sp
   if (sorted.length === 1) return structuredClone(sorted[0].profile);
   const hs = sorted.map((a) => a.h);
   const nearIdx = nearestIndex(sorted, h);
-  return evalAtNodes(sorted.map((a) => a.profile), hs, h, nearIdx, '') as SpeciesProfile;
+  const out = evalAtNodes(sorted.map((a) => a.profile), hs, h, nearIdx, '') as SpeciesProfile;
+  if (h <= sorted[0].h) {
+    out.crownShape = sorted[0].profile.crownShape;
+    delete out.crownShapeB;
+    delete out.crownShapeBlend;
+  } else if (h >= sorted[sorted.length - 1].h) {
+    out.crownShape = sorted[sorted.length - 1].profile.crownShape;
+    delete out.crownShapeB;
+    delete out.crownShapeBlend;
+  } else {
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (h >= sorted[i].h && h <= sorted[i + 1].h) {
+        const sA = sorted[i].profile.crownShape;
+        const sB = sorted[i + 1].profile.crownShape;
+        const w = (h - sorted[i].h) / Math.max(1e-6, sorted[i + 1].h - sorted[i].h);
+        if (sA !== sB && w > 1e-6 && w < 1 - 1e-6) {
+          out.crownShape = sA;
+          out.crownShapeB = sB;
+          out.crownShapeBlend = w;
+        } else {
+          out.crownShape = w >= 1 - 1e-6 ? sB : sA;
+          delete out.crownShapeB;
+          delete out.crownShapeBlend;
+        }
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 /** Najniższy węzeł wzorców; poniżej profil się nie zmienia */

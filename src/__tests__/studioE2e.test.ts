@@ -174,8 +174,25 @@ describe('Tree Studio E2E', () => {
       {
         name: 'levels[0].lengthRatio',
         mutate: (p) => {
-          p.limbsReachEnvelope = false;
           p.levels[0].lengthRatio = p.levels[0].lengthRatio * 0.4;
+        },
+      },
+      {
+        name: 'levels[0].lengthRatio (increase > 1)',
+        mutate: (p) => {
+          p.levels[0].lengthRatio = p.levels[0].lengthRatio * 1.4;
+        },
+      },
+      {
+        name: 'levels[1].lengthRatio',
+        mutate: (p) => {
+          if (p.levels[1]) p.levels[1].lengthRatio = p.levels[1].lengthRatio * 0.4;
+        },
+      },
+      {
+        name: 'levels[2].lengthRatio',
+        mutate: (p) => {
+          if (p.levels[2]) p.levels[2].lengthRatio = p.levels[2].lengthRatio * 0.4;
         },
       },
       {
@@ -299,6 +316,51 @@ describe('Tree Studio E2E', () => {
         body: JSON.stringify({ kind: 'NOPE', anchors: poplarAnchors }),
       });
       expect(resBad.status).toBe(400);
+
+      // HTML zawiera elementy tła referencyjnego
+      const htmlRes = await fetch(`http://127.0.0.1:${port}/`);
+      expect(htmlRes.status).toBe(200);
+      const html = await htmlRes.text();
+      for (const id of ['id="bg-canvas"', 'id="bg-file-input"', 'id="bg-scale-num"', 'id="bg-ox-num"', 'id="bg-oy-num"']) {
+        expect(html).toContain(id);
+      }
+
+      // POST /api/studio-bg + GET /api/studio-bg zapisują i zwracają byTier oraz byFile
+      const bgPayload = {
+        byTier: {
+          '__E2E_TEST_KIND__:15': {
+            fileName: 'e2e-ref.png',
+            dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+            scale: 1.25,
+            offsetX: 0.5,
+            offsetY: -0.2,
+            opacity: 0.6,
+            visible: true,
+          },
+        },
+        byFile: {
+          'e2e-ref.png': {
+            scale: 1.25,
+            offsetX: 0.5,
+            offsetY: -0.2,
+            opacity: 0.6,
+            visible: true,
+          },
+        },
+      };
+      const bgPost = await fetch(`http://127.0.0.1:${port}/api/studio-bg`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bgPayload),
+      });
+      expect(bgPost.status).toBe(200);
+      expect(await bgPost.json()).toEqual({ ok: true });
+
+      const bgGet = await fetch(`http://127.0.0.1:${port}/api/studio-bg`);
+      expect(bgGet.status).toBe(200);
+      const bgData = (await bgGet.json()) as typeof bgPayload;
+      expect(bgData.byTier['__E2E_TEST_KIND__:15']).toEqual(bgPayload.byTier['__E2E_TEST_KIND__:15']);
+      expect(bgData.byFile['e2e-ref.png']).toEqual(bgPayload.byFile['e2e-ref.png']);
     } finally {
       fs.writeFileSync(FITTED_PATH, originalContent, 'utf8');
       if (serverProc && !serverProc.killed) {

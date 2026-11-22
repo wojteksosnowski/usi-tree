@@ -197,7 +197,7 @@ export class TreeGenerator {
     skeleton: TreeSkeleton,
     params: Pick<
       TreeGenerationParams,
-      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes'
+      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes' | 'onStem'
     >
   ): TreeRawGeometryResult {
     const activeSkeleton = params.wind && params.wind.strength > 0
@@ -237,8 +237,11 @@ export class TreeGenerator {
         stroke && !skeleton.uniformStroke ? TreeGenerator.strokeStem(s, stroke, height, trunkR, profile.twigStroke) : s;
 
       if (s.level === 0) {
+        params.onStem?.({ level: 0, sides: radialSegs, rings: finalStem.r.length, ribbon: false });
         extrudeStem(finalStem, scale, radialSegs, jitter, 1, barkPrng, builder, undefined, 'cone');
       } else if (s.level === 1) {
+        const ringsL1 = selectStemRings(finalStem, tolL1 * unit);
+        params.onStem?.({ level: 1, sides: radialSegs, rings: ringsL1.length, ribbon: false });
         extrudeStem(
           finalStem,
           scale,
@@ -247,12 +250,14 @@ export class TreeGenerator {
           1,
           barkPrng,
           builder,
-          selectStemRings(finalStem, tolL1 * unit),
+          ringsL1,
           'spike'
         );
       } else if (s.level === 2) {
         const rings = selectStemRings(finalStem, tolL2 * unit);
-        if (deepest === 2 && detail === 'MEDIUM') {
+        const ribbon2 = deepest === 2 && detail === 'MEDIUM';
+        params.onStem?.({ level: 2, sides: ribbon2 ? 2 : Math.max(3, radialSegs - 1), rings: rings.length, ribbon: ribbon2 });
+        if (ribbon2) {
           extrudeRibbonStem(finalStem, scale, jitter, barkPrng, builder, rings, stemIdx, doubleFace);
         } else {
           extrudeStem(
@@ -268,13 +273,15 @@ export class TreeGenerator {
           );
         }
       } else {
+        const ringsL3 = selectStemRings(finalStem, tolL3 * unit);
+        params.onStem?.({ level: s.level, sides: 2, rings: ringsL3.length, ribbon: true });
         extrudeRibbonStem(
           finalStem,
           scale,
           jitter,
           barkPrng,
           builder,
-          selectStemRings(finalStem, tolL3 * unit),
+          ringsL3,
           stemIdx,
           doubleFace
         );
@@ -337,7 +344,7 @@ export class TreeGenerator {
    */
   private static meshSkeletonLod(
     skeleton: TreeSkeleton,
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes'>,
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'onStem'>,
     lod: TreeMeshLod
   ): TreeRawGeometryResult {
     const { profile, stems, scale, height } = skeleton;
@@ -345,12 +352,23 @@ export class TreeGenerator {
     const clampSides = (n: number) => Math.max(3, Math.min(8, Math.round(n)));
     const radialSegs = clampSides(params.radialSegments ?? profile.radialSegments ?? 4);
     const trunkSides = clampSides(lod.trunkSides ?? radialSegs);
-    const rod = lod.branchSides !== undefined && lod.branchSides < 3;
+    // `levelSides` (indeks = rząd pędu, ostatnia wartość powtarza się głębiej): 2 = wstęga, ≥3 = tuba z szpicem; ma pierwszeństwo przed trunkSides/branchSides
+    const levelSides = lod.levelSides && lod.levelSides.length > 0 ? lod.levelSides : undefined;
+    const sidesAtLevel = (level: number) => {
+      const v = levelSides![Math.min(level, levelSides!.length - 1)];
+      return v < 3 ? 2 : clampSides(v);
+    };
+    const rod = !levelSides && lod.branchSides !== undefined && lod.branchSides < 3;
+    const isRibbon = (s: Stem) => (levelSides ? sidesAtLevel(s.level) === 2 : !rod && s.level >= 3);
     const branchSides = clampSides(lod.branchSides ?? Math.max(3, radialSegs - 1));
-    const maxLevel = Math.max(1, profile.levels.length - Math.max(0, lod.dropDeepestLevels ?? 0));
+    const maxLevel = Math.max(1, profile.levels.length + 1 - Math.max(0, lod.dropDeepestLevels ?? 0));
     // Progi w ułamku wysokości drzewa → jednostki szkieletu
     const unit = height / scale;
-    const minRadius = (lod.minStemRadiusRatio ?? 0) * unit;
+    const minRadiusFromPx =
+      lod.minStemThicknessPx !== undefined && lod.minPixelsPerUnit !== undefined && lod.minPixelsPerUnit > 0
+        ? (lod.minStemThicknessPx * 0.5) / lod.minPixelsPerUnit
+        : 0;
+    const minRadius = Math.max((lod.minStemRadiusRatio ?? 0) * unit, minRadiusFromPx);
     const tolerance = (lod.ringTolerance ?? 0) * unit;
 
     const stroke = params.stroke;
@@ -364,7 +382,7 @@ export class TreeGenerator {
       drawn.push(finalStem);
     }
     const ringsOf = new Map<Stem, number[]>();
-    const sidesOf = (s: Stem) => (s.level === 0 ? trunkSides : branchSides);
+    const sidesOf = (s: Stem) => (levelSides ? sidesAtLevel(s.level) : s.level === 0 ? trunkSides : branchSides);
     // Pręt: konar (rząd 1) zostaje otwartą tubą o pełnej grubości końca, cieńsze pędy zbiegają się w szpic; !rod: gałęzie zbiegają się w szpic
     const tipOf = (s: Stem) => (s.level === 0 ? 'cone' : !rod ? 'spike' : s.level === 1 ? 'open' : 'spike');
     const tolOf = (s: Stem) =>
@@ -375,7 +393,7 @@ export class TreeGenerator {
     const cost = (s: Stem) => {
       const rings = selectStemRings(s, tolOf(s));
       ringsOf.set(s, rings);
-      if (!rod && s.level >= 3) {
+      if (isRibbon(s)) {
         return rings.length < 2 ? 0 : 2 * (rings.length - 2) + 1;
       }
       const tip = tipOf(s);
@@ -410,7 +428,13 @@ export class TreeGenerator {
       if (windTags) tagWindStem(builder, s, stemIdx, scale, profile);
       const jitter = trunk ? profile.jitterStrength : profile.jitterStrength * 0.5;
       const rings = ringsOf.get(s) ?? selectStemRings(s, tolOf(s));
-      if (!rod && s.level >= 3) {
+      params.onStem?.({
+        level: s.level,
+        sides: isRibbon(s) ? 2 : sidesOf(s),
+        rings: rings.length,
+        ribbon: isRibbon(s),
+      });
+      if (isRibbon(s)) {
         extrudeRibbonStem(s, scale, jitter, prng, builder, rings, stemIdx, false);
       } else {
         extrudeStem(
@@ -432,6 +456,12 @@ export class TreeGenerator {
       if (windTags) builder.setWindFoliage(windFoliageWeight(profile));
       const field = collectLeafSites(stems, profile, skeleton.seed, skeleton.leafSites);
       if (lod.crownShell) {
+        // Punkty gałęzi rzędów 1..N (także odcięte z kory), bez automatycznych witek N+1
+        const branchPoints: number[] = [];
+        for (const st of stems) {
+          if (st.level < 1 || st.level > profile.levels.length) continue;
+          for (let k = 0; k < st.px.length; k++) branchPoints.push(st.px[k], st.py[k], st.pz[k]);
+        }
         addCrownShell(
           field,
           scale,
@@ -440,7 +470,8 @@ export class TreeGenerator {
           builder,
           builder.indices.length,
           lod.crownShell,
-          lod
+          lod,
+          branchPoints
         );
       } else if (isFullLeafLod(lod)) {
         // Poziom bliski = liście oryginału: ta sama ścieżka `addLeaves` (własny strumień losowy z ziarna drzewa)

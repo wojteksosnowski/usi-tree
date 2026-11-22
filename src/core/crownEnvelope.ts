@@ -40,11 +40,27 @@ export function crownShapeRatio(shape: CrownShape, t: number): number {
  * Kształt korony z przesuniętym maksimum: t odwzorowane odcinkami liniowo tak, by `peak` trafiało
  * w naturalne maksimum kształtu (nasada i wierzchołek bez zmian).
  */
-export function crownRatio(shape: CrownShape, t: number, peak: number | undefined): number {
+function crownSingleRatio(shape: CrownShape, t: number, peak: number | undefined): number {
   const p0 = CROWN_SHAPE_PEAK[shape];
-  if (peak === undefined || p0 <= 0 || peak <= 0 || peak >= 1 || t >= 1) return crownShapeRatio(shape, t);
-  const u = t <= peak ? (t / peak) * p0 : p0 + ((t - peak) / (1 - peak)) * (1 - p0);
+  const p = peak !== undefined ? Math.min(0.95, Math.max(0.05, peak)) : undefined;
+  if (p === undefined || p0 <= 0 || p <= 0 || p >= 1 || t >= 1) return crownShapeRatio(shape, t);
+  const u = t <= p ? (t / p) * p0 : p0 + ((t - p) / (1 - p)) * (1 - p0);
   return crownShapeRatio(shape, u);
+}
+
+export function crownRatio(
+  shape: CrownShape,
+  t: number,
+  peak?: number,
+  shapeB?: CrownShape,
+  blend?: number
+): number {
+  const rA = crownSingleRatio(shape, t, peak);
+  if (shapeB && shapeB !== shape && blend !== undefined && blend > 0) {
+    if (blend >= 1) return crownSingleRatio(shapeB, t, peak);
+    return (1 - blend) * rA + blend * crownSingleRatio(shapeB, t, peak);
+  }
+  return rA;
 }
 
 /**
@@ -57,6 +73,8 @@ export class CrownEnvelope {
   readonly invH: number;
   readonly spread: number;
   readonly shape: CrownShape;
+  readonly shapeB: CrownShape | undefined;
+  readonly shapeBlend: number;
   readonly peak: number | undefined;
   groundClearance = -Infinity;
 
@@ -68,16 +86,25 @@ export class CrownEnvelope {
       this.invH = 1;
       this.spread = 0;
       this.shape = 'SPHERICAL';
+      this.shapeB = undefined;
+      this.shapeBlend = 0;
       this.peak = undefined;
       return;
     }
     this.profile = profile;
     this.disabled = !!profile.disableEnvelope;
-    this.base = profile.trunkHeightRatio;
+    this.base = Math.min(profile.trunkHeightRatio, (profile.trunkLengthRatio ?? 1) * 0.85);
     this.invH = 1 / Math.max(1e-6, 1 - this.base);
-    this.spread = profile.crownSpreadRatio * (profile.envelopeScale ?? 1.0) * ENVELOPE_FILL;
+    const l1Scale = Math.max(1, profile.levels?.[0]?.lengthRatio ?? 1);
+    this.spread = profile.crownSpreadRatio * (profile.envelopeScale ?? 1.0) * l1Scale * ENVELOPE_FILL;
     this.shape = profile.crownShape;
+    this.shapeB = profile.crownShapeB;
+    this.shapeBlend = profile.crownShapeBlend ?? 0;
     this.peak = profile.crownPeak;
+  }
+
+  ratioAt(t: number): number {
+    return crownRatio(this.shape, t, this.peak, this.shapeB, this.shapeBlend);
   }
 
   inside(x: number, y: number, z: number): boolean {
@@ -86,12 +113,14 @@ export class CrownEnvelope {
 
   isOutside(x: number, y: number, z: number, bypassRadial = false): boolean {
     if (!this.profile) return false;
-    if (this.shape !== 'CYLINDRICAL' && y > ENVELOPE_CEILING) return true;
+    const isCylindrical =
+      this.shape === 'CYLINDRICAL' && (!this.shapeB || this.shapeBlend <= 0 || this.shapeB === 'CYLINDRICAL');
+    if (!isCylindrical && y > ENVELOPE_CEILING) return true;
     if (y < this.groundClearance) return true;
     if (this.disabled) return false;
     const t = Math.max(0, (y - this.base) * this.invH);
-    if (this.shape !== 'CYLINDRICAL' && t > ENVELOPE_CEILING) return true;
-    const R0 = this.spread * crownRatio(this.shape, t, this.peak);
+    if (!isCylindrical && t > ENVELOPE_CEILING) return true;
+    const R0 = this.spread * this.ratioAt(t);
     const R = bypassRadial ? R0 * ENVELOPE_RADIAL_BYPASS : R0;
     return x * x + z * z > R * R;
   }

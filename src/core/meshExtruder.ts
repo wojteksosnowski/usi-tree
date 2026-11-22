@@ -1099,88 +1099,146 @@ function leafEmitter(
   };
 }
 
-/**
- * Pole rzutu bocznego (płaszczyzna x–y) liści poziomu bliskiego, w jednostkach szkieletu do kwadratu: liście są
- * budowane jak dla poziomu bliskiego i rasteryzowane na siatce (piksel zakryty, gdy jego środek leży w trójkącie).
- * Miara tego, ile sylwetki korony faktycznie zakrywają liście — gęsta korona prawie całą, ażurowa ułamek.
- */
-function leafCloudSideArea(field: LeafSiteField, profile: SpeciesProfile, seed: number): number {
-  const tmp = new MeshBufferBuilder();
-  const emit = leafEmitter(field, 1, profile, seed, tmp, selectLeafSites(field, profile, {}), 'hex', {
-    maxLength: Infinity,
-  });
-  for (let t = 0; t < 3; t++) emit(t);
-  const w = tmp.maxX - tmp.minX,
-    h = tmp.maxY - tmp.minY;
-  const G = 96;
-  const cell = Math.max(w, h) / G;
-  if (!(cell > 0)) return 0;
-  const nx = Math.ceil(w / cell) + 1,
-    ny = Math.ceil(h / cell) + 1;
-  const grid = new Uint8Array(nx * ny);
-  const pos = tmp.positions.a,
-    idx = tmp.indices.a;
-  for (let k = 0; k < tmp.indices.length; k += 3) {
-    const a = idx[k] * 3,
-      b = idx[k + 1] * 3,
-      c = idx[k + 2] * 3;
-    const ax = (pos[a] - tmp.minX) / cell,
-      ay = (pos[a + 1] - tmp.minY) / cell;
-    const bx = (pos[b] - tmp.minX) / cell,
-      by = (pos[b + 1] - tmp.minY) / cell;
-    const cx = (pos[c] - tmp.minX) / cell,
-      cy = (pos[c + 1] - tmp.minY) / cell;
-    const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    if (Math.abs(area) < 1e-12) continue;
-    const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx))),
-      x1 = Math.min(nx - 1, Math.ceil(Math.max(ax, bx, cx)));
-    const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy))),
-      y1 = Math.min(ny - 1, Math.ceil(Math.max(ay, by, cy)));
-    for (let y = y0; y <= y1; y++) {
-      const py = y + 0.5;
-      for (let x = x0; x <= x1; x++) {
-        const px = x + 0.5;
-        const w0 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) / area;
-        const w1 = ((cx - bx) * (py - by) - (cy - by) * (px - bx)) / area;
-        const w2 = ((ax - cx) * (py - cy) - (ay - cy) * (px - cx)) / area;
-        if (w0 >= 0 && w1 >= 0 && w2 >= 0) grid[y * nx + x] = 1;
-      }
-    }
+/** Amplituda szumu promienia otoczki (tylko na zewnątrz) i jasności jej ścian (z ziarna drzewa) */
+const SHELL_NOISE = 0.05;
+const SHELL_TONE_NOISE = 0.16;
+/** Udział normalnej geometrycznej w normalnej cieniowania ściany (reszta: losowa, jak u liści) */
+const SHELL_NORMAL_OUTWARD = 0.25;
+/** Przesunięcie tonów ku ciemnym (ułamek pola): pełna bryła nie ma cienia własnego chmury liści */
+const SHELL_TONE_DARKEN = 0.15;
+/** Największa długość liścia bryły korony względem promienia korony */
+const SHELL_LEAF_MAX_LENGTH = 0.9;
+/** Zapas otoczki za miejscem liścia (ułamek długości liścia) i za punktem gałęzi */
+const SHELL_LEAF_MARGIN = 0.5;
+const SHELL_BRANCH_MARGIN = 0.15;
+/** Najmniejszy promień sąsiada względem średniej sąsiadów (wygładzanie kolców i dziur) */
+const SHELL_SMOOTH = 0.85;
+/** Percentyl punktów w stożku kierunku wyznaczający promień (reszta — pojedyncze witki — może wystawać) */
+export const SHELL_PERCENTILE = 0.93;
+/** Percentyl wysokości miejsc liści wyznaczający podstawę korony (poniżej bryła jest ścięta i zaokrąglona) */
+export const SHELL_BASE_PERCENTILE = 0.05;
+/** Miękkość ścięcia spodu: ułamek wysokości bryły, o który spód może zejść poniżej podstawy korony */
+const SHELL_BASE_SOFT = 0.06;
+/** Największy promień wierzchołka bieguna względem średniej pierwszego pasa (zaokrąglony wierzchołek, bez szpica) */
+const SHELL_POLE = 0.88;
+/** Rozdzielenie skupisk: odległość środków / suma promieni rms; poniżej — skupiska zlewają się w jedną bryłę */
+export const SHELL_BLOB_SEPARATION = 1.1;
+/** Najmniejszy stosunek szerokości do wysokości chmury punktów, przy którym korona może się podzielić */
+const SHELL_BLOB_MIN_ASPECT = 0.5;
+/** Waga osi pionowej przy szukaniu skupisk */
+const SHELL_BLOB_VERTICAL = 0.25;
+/** Najmniejszy udział punktów skupiska i domyślna największa liczba brył */
+const SHELL_BLOB_MIN_SHARE = 0.08;
+export const SHELL_MAX_BLOBS = 3;
+/** Pułap trójkątów otoczki wielobryłowej */
+const SHELL_MAX_TRIANGLES = 200;
+
+/** Deterministyczne k-średnich (start: najdalsze punkty); zwraca przypisanie albo null, gdy skupiska nie są rozdzielone */
+function splitShellPoints(P0: Float64Array, n: number, k: number): Int32Array | null {
+  // Skupiska szukane głównie poziomo: oś pionowa osłabiona, by smukłe i stożkowe korony nie dzieliły się na piętra
+  const P = new Float64Array(P0);
+  for (let i = 0; i < n; i++) P[i * 3 + 1] *= SHELL_BLOB_VERTICAL;
+  const step = Math.max(1, Math.floor(n / 1200));
+  const sample: number[] = [];
+  for (let i = 0; i < n; i += step) sample.push(i);
+  if (sample.length < k * 4) return null;
+  // Korony kolumnowe (szerokość < połowy wysokości) nie dzielą się na bryły obok siebie
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const i of sample) {
+    x0 = Math.min(x0, P0[i * 3]); x1 = Math.max(x1, P0[i * 3]);
+    y0 = Math.min(y0, P0[i * 3 + 1]); y1 = Math.max(y1, P0[i * 3 + 1]);
+    z0 = Math.min(z0, P0[i * 3 + 2]); z1 = Math.max(z1, P0[i * 3 + 2]);
   }
-  let n = 0;
-  for (let i = 0; i < grid.length; i++) n += grid[i];
-  return n * cell * cell;
+  if (Math.max(x1 - x0, z1 - z0) < SHELL_BLOB_MIN_ASPECT * (y1 - y0)) return null;
+  let mx = 0, my = 0, mz = 0;
+  for (const i of sample) { mx += P[i * 3]; my += P[i * 3 + 1]; mz += P[i * 3 + 2]; }
+  mx /= sample.length; my /= sample.length; mz /= sample.length;
+  const C: number[][] = [];
+  let far = sample[0], fd = -1;
+  for (const i of sample) {
+    const d = (P[i * 3] - mx) ** 2 + (P[i * 3 + 1] - my) ** 2 + (P[i * 3 + 2] - mz) ** 2;
+    if (d > fd) { fd = d; far = i; }
+  }
+  C.push([P[far * 3], P[far * 3 + 1], P[far * 3 + 2]]);
+  while (C.length < k) {
+    let bi = sample[0], bd = -1;
+    for (const i of sample) {
+      let md = Infinity;
+      for (const c of C) md = Math.min(md, (P[i * 3] - c[0]) ** 2 + (P[i * 3 + 1] - c[1]) ** 2 + (P[i * 3 + 2] - c[2]) ** 2);
+      if (md > bd) { bd = md; bi = i; }
+    }
+    C.push([P[bi * 3], P[bi * 3 + 1], P[bi * 3 + 2]]);
+  }
+  const label = (i: number) => {
+    let b = 0, bd = Infinity;
+    for (let c = 0; c < k; c++) {
+      const d = (P[i * 3] - C[c][0]) ** 2 + (P[i * 3 + 1] - C[c][1]) ** 2 + (P[i * 3 + 2] - C[c][2]) ** 2;
+      if (d < bd) { bd = d; b = c; }
+    }
+    return b;
+  };
+  for (let it = 0; it < 12; it++) {
+    const sum = C.map(() => [0, 0, 0, 0]);
+    for (const i of sample) {
+      const c = label(i);
+      sum[c][0] += P[i * 3]; sum[c][1] += P[i * 3 + 1]; sum[c][2] += P[i * 3 + 2]; sum[c][3]++;
+    }
+    for (let c = 0; c < k; c++) if (sum[c][3] > 0) C[c] = [sum[c][0] / sum[c][3], sum[c][1] / sum[c][3], sum[c][2] / sum[c][3]];
+  }
+  const cnt = new Float64Array(k), rr = new Float64Array(k);
+  for (const i of sample) {
+    const c = label(i);
+    cnt[c]++;
+    rr[c] += (P[i * 3] - C[c][0]) ** 2 + (P[i * 3 + 1] - C[c][1]) ** 2 + (P[i * 3 + 2] - C[c][2]) ** 2;
+  }
+  for (let c = 0; c < k; c++) {
+    if (cnt[c] < SHELL_BLOB_MIN_SHARE * sample.length) return null;
+    rr[c] = Math.sqrt(rr[c] / cnt[c]);
+  }
+  for (let a = 0; a < k; a++) {
+    let nearest = Infinity;
+    for (let b = 0; b < k; b++) {
+      if (a === b) continue;
+      const d = Math.hypot(C[a][0] - C[b][0], C[a][1] - C[b][1], C[a][2] - C[b][2]);
+      nearest = Math.min(nearest, d / (rr[a] + rr[b] + 1e-9));
+    }
+    if (nearest < SHELL_BLOB_SEPARATION) return null;
+  }
+  const assign = new Int32Array(n);
+  for (let i = 0; i < n; i++) assign[i] = label(i);
+  return assign;
 }
 
-/** Percentyl zasięgu miejsc liści w komórce rdzenia bryły korony */
-const SHELL_CORE_PERCENTILE = 0.7;
-/** Wysunięcie rdzenia poza miejsca liści (ułamek długości liścia profilu) */
-const SHELL_CORE_PUSH = 1.0;
-/** Amplituda szumu promienia rdzenia i jasności jego ścian (z ziarna drzewa) */
-const SHELL_NOISE = 0.12;
-const SHELL_TONE_NOISE = 0.16;
-/** Udział normalnej geometrycznej w normalnej cieniowania ściany rdzenia (reszta: losowa, jak u liści) */
-const SHELL_NORMAL_OUTWARD = 0.25;
-/** Przesunięcie tonów rdzenia ku ciemnym (ułamek pola): pełna bryła nie ma cienia własnego chmury liści */
-const SHELL_TONE_DARKEN = 0.15;
-/** Największa długość liścia bryły korony względem promienia korony (liści jest mało, bez pułapu byłyby wielkości korony) */
-const SHELL_LEAF_MAX_LENGTH = 0.9;
-/** Pole rzutu rdzenia względem pola rzutu liści poziomu bliskiego (strojone miarą oświetloną; resztę dokładają liście bryły) */
-const SHELL_CORE_SHARE = 0.78;
+interface ShellHull {
+  px: Float64Array;
+  py: Float64Array;
+  pz: Float64Array;
+  faces: number[];
+  light: Float64Array;
+}
+
+const quantile = (v: number[], q: number) => {
+  if (v.length === 0) return -1;
+  v.sort((a, b) => a - b);
+  return v.length < 5 ? v[v.length - 1] : v[Math.min(v.length - 1, Math.floor(q * (v.length - 1) + 0.5))];
+};
 
 /**
- * Bryła korony zamiast liści: zamknięty rdzeń plus kilkadziesiąt dużych liści na nim.
+ * Bryła korony (otoczka) zamiast liści: nieregularne, zamknięte bryły gwiaździste wokół środków skupisk korony.
+ * Punkty: miejsca liści i punkty gałęzi rzędów 1..N (`branchPoints`, xyz w jednostkach szkieletu; witki automatyczne
+ * N+1 pomija wywołujący). Otoczka nie mieści wszystkiego: promień kierunku to wysoki percentyl (`SHELL_PERCENTILE`)
+ * punktów w jego stożku, więc pojedyncze witki mogą wystawać. Spód jest ścięty na podstawie korony (percentyl
+ * `SHELL_BASE_PERCENTILE` wysokości liści) i zaokrąglony — pień pozostaje widoczny; biegun górny zaokrąglony.
  *
- * Rdzeń to siatka walcowa wokół pionowej osi korony: `rings` pięter × `sides` boków i dwa bieguny; promień wierzchołka
- * to percentyl zasięgu miejsc liści w jego piętrze i sektorze z szumem z ziarna — przekrój idzie za chmurą liści
- * w obu osiach, obrys jest łamany, nie eliptyczny. Promień jest skalowany tak, by rdzeń zakrył stałą część pola rzutu
- * chmury liści (rzadka korona = chudszy rdzeń), a liście bryły dokładały resztę — pole rzutu i cienia zgadza się z koroną. Ściany mają własne wierzchołki; ich normalna cieniowania to
- * mieszanka normalnej ściany i losowego kierunku — pełna bryła oświetlona jak ściana byłaby jaśniejsza niż liście.
- * Ton ściany: ściany uszeregowane wg jasności miejsc swojej komórki z szumem dostają tony w proporcji miejsc liści
- * w kubełkach `shade`, przesuniętej ku ciemnym — plamy, nie trzy poziome pasy.
+ * Gdy punkty dzielą się na rozdzielone skupiska (k-średnich, k ≤ `shell.maxBlobs`, domyślnie `SHELL_MAX_BLOBS`;
+ * kryterium `SHELL_BLOB_SEPARATION`) powstaje kilka mniejszych brył (łącznie ≤ `SHELL_MAX_TRIANGLES` trójkątów);
+ * `maxBlobs` = 1 daje jedną bryłę. Każda bryła: `rings` pasów szerokości × `sides` sektorów (bieguny pionowo), promienie
+ * wygładzone (sąsiad ≥ 0,85 średniej sąsiadów), puste kierunki uzupełnione z sąsiadów, szum z ziarna tylko na zewnątrz.
+ * Ściany mają własne wierzchołki; normalna cieniowania to mieszanka normalnej ściany i losowego kierunku. Ton ściany:
+ * ściany uszeregowane wg jasności pola świetlnego z szumem dostają tony w proporcji miejsc liści w kubełkach `shade`,
+ * przesuniętej ku ciemnym.
  *
- * `lobes` pierwszych miejsc z kolejności wyboru (te same co na poziomach liściowych, więc shell ⊂ far) dostaje liście
- * jak w `addLeavesLod` — te same obrysy i orientacje co liście poziomu bliskiego, tylko większe; łamią kontur rdzenia.
+ * `lobes` pierwszych miejsc z kolejności wyboru dostaje duże liście jak w `addLeavesLod` (domyślnie 0).
  */
 export function addCrownShell(
   field: LeafSiteField,
@@ -1189,71 +1247,69 @@ export function addCrownShell(
   seed: number,
   builder: MeshBufferBuilder,
   startIndex: number,
-  shell: { rings: number; sides: number; lobes?: number },
-  lod: TreeMeshLod = {}
+  shell: { rings: number; sides: number; lobes?: number; maxBlobs?: number },
+  lod: TreeMeshLod = {},
+  branchPoints: readonly number[] = []
 ) {
   if (field.count === 0) return;
-  const rings = Math.max(1, Math.min(16, Math.round(shell.rings)));
-  const sides = Math.max(3, Math.min(24, Math.round(shell.sides)));
-  const { cx, cz, minY, maxY } = field;
+  const bands0 = Math.max(2, Math.min(16, Math.round(shell.rings)));
+  const sectors0 = Math.max(3, Math.min(24, Math.round(shell.sides)));
   const leaf = profile.leafSizeRatio;
-  const spanY = Math.max(leaf, maxY - minY);
-  const reach = crownReach(field, rings, sides, SHELL_CORE_PERCENTILE);
   const prng = new FastPrng(seed ^ 0x2c1b3c6d);
-
-  // Pole rzutu bocznego liści poziomu bliskiego: z niego wynika, ile sylwetki ma zakryć rdzeń (reszta: liście bryły) —
-  // ażurowa korona dostaje chudy rdzeń.
-  const aspect = profile.leafAspect ?? 0.55;
-  const sideArea = leafCloudSideArea(field, profile, seed);
-  let meanR = 0;
-  for (let i = 0; i < reach.r.length; i++) meanR += (reach.r[i] + leaf * SHELL_CORE_PUSH) / reach.r.length;
-  const coreArea = 2 * meanR * spanY * 0.8;
-  const slim = Math.max(0.25, Math.min(1.45, (SHELL_CORE_SHARE * sideArea) / Math.max(1e-9, coreArea)));
   const leafCount = Math.max(0, Math.min(field.count, Math.floor(shell.lobes ?? 0)));
 
-  // Wierzchołki: 0 = biegun górny, 1..rings×sides = pierścienie od góry, ostatni = biegun dolny
-  const nVerts = rings * sides + 2;
-  const px = new Float64Array(nVerts),
-    py = new Float64Array(nVerts),
-    pz = new Float64Array(nVerts),
-    light = new Float64Array(nVerts);
-  px[0] = px[nVerts - 1] = cx;
-  pz[0] = pz[nVerts - 1] = cz;
-  py[0] = maxY;
-  py[nVerts - 1] = maxY - spanY;
-  for (let r = 0; r < rings; r++) {
-    const band = rings - 1 - r;
-    for (let j = 0; j < sides; j++) {
-      const v = 1 + r * sides + j;
-      const radius =
-        (reach.r[band * sides + j] + leaf * SHELL_CORE_PUSH) * slim * (1 + prng.signedRange(SHELL_NOISE));
-      // Środek sektora j (jak w `crownReach`: sektor = (atan2 / 2π + 0,5) × sides)
-      const phi = ((j + 0.5) / sides - 0.5) * Math.PI * 2;
-      px[v] = cx + Math.cos(phi) * radius;
-      pz[v] = cz + Math.sin(phi) * radius;
-      py[v] = maxY - spanY + ((band + 0.5) / rings) * spanY;
-      light[v] = reach.light[band * sides + j];
-    }
+  // Punkty: x, y, z i zapas; pierwsze `field.count` to miejsca liści
+  const nBr = Math.floor(branchPoints.length / 3);
+  const nPts = field.count + nBr;
+  const P = new Float64Array(nPts * 3), M = new Float64Array(nPts);
+  for (let i = 0; i < field.count; i++) {
+    P[i * 3] = field.sites[i * 6]; P[i * 3 + 1] = field.sites[i * 6 + 1]; P[i * 3 + 2] = field.sites[i * 6 + 2];
+    M[i] = leaf * SHELL_LEAF_MARGIN;
   }
-  for (let j = 0; j < sides; j++) {
-    light[0] += light[1 + j] / sides;
-    light[nVerts - 1] += light[1 + (rings - 1) * sides + j] / sides;
+  for (let i = 0; i < nBr; i++) {
+    const q = field.count + i;
+    P[q * 3] = branchPoints[i * 3]; P[q * 3 + 1] = branchPoints[i * 3 + 1]; P[q * 3 + 2] = branchPoints[i * 3 + 2];
+    M[q] = leaf * SHELL_BRANCH_MARGIN;
   }
 
-  // Ściany (nawinięcie na zewnątrz)
-  const faces: number[] = [];
-  const last = nVerts - 1;
-  for (let j = 0; j < sides; j++) {
-    const j1 = (j + 1) % sides;
-    faces.push(0, 1 + j1, 1 + j);
-    for (let r = 0; r + 1 < rings; r++) {
-      const a = 1 + r * sides + j,
-        b = 1 + r * sides + j1,
-        c = 1 + (r + 1) * sides + j,
-        d = 1 + (r + 1) * sides + j1;
-      faces.push(a, b, d, a, d, c);
+  // Skupiska
+  const maxBlobs = Math.max(1, Math.min(4, Math.floor(shell.maxBlobs ?? SHELL_MAX_BLOBS)));
+  let groups: number[][];
+  let assign: Int32Array | null = null;
+  for (let k = maxBlobs; k >= 2 && !assign; k--) assign = splitShellPoints(P, nPts, k);
+  if (assign) {
+    const k = Math.max(...assign) + 1;
+    groups = Array.from({ length: k }, () => [] as number[]);
+    for (let i = 0; i < nPts; i++) groups[assign[i]].push(i);
+  } else {
+    groups = [Array.from({ length: nPts }, (_, i) => i)];
+  }
+  const nb = groups.length;
+  const totalTris = nb === 1 ? 2 * sectors0 * (bands0 - 1) : Math.min(SHELL_MAX_TRIANGLES, Math.round(2 * sectors0 * (bands0 - 1) * 1.5));
+  const weights = groups.map((g) => Math.max(0.2, g.length / nPts));
+  const wSum = weights.reduce((a, b) => a + b, 0);
+
+  const hulls: ShellHull[] = [];
+  groups.forEach((idx, gi) => {
+    let bands = bands0, sectors = sectors0;
+    if (nb > 1) {
+      const tris = (totalTris * weights[gi]) / wSum;
+      sectors = Math.max(6, Math.min(sectors0, Math.round(Math.sqrt((tris / 2) * (sectors0 / (bands0 - 1))))));
+      bands = Math.max(4, Math.min(bands0, Math.round(tris / (2 * sectors)) + 1));
     }
-    faces.push(last, 1 + (rings - 1) * sides + j, 1 + (rings - 1) * sides + j1);
+    hulls.push(buildShellHull(field, P, M, idx, bands, sectors, prng, leaf));
+  });
+
+  // Scalenie brył w jedną listę wierzchołków i ścian
+  let vTotal = 0;
+  for (const h of hulls) vTotal += h.px.length;
+  const px = new Float64Array(vTotal), py = new Float64Array(vTotal), pz = new Float64Array(vTotal), light = new Float64Array(vTotal);
+  const faces: number[] = [];
+  let off = 0;
+  for (const h of hulls) {
+    px.set(h.px, off); py.set(h.py, off); pz.set(h.pz, off); light.set(h.light, off);
+    for (const f of h.faces) faces.push(f + off);
+    off += h.px.length;
   }
   const nFaces = faces.length / 3;
   const faceArea = new Float64Array(nFaces);
@@ -1349,4 +1405,138 @@ export function addCrownShell(
     builder.addGroup(groupStart, builder.indices.length - groupStart, t + 1);
     groupStart = builder.indices.length;
   }
+}
+
+/** Jedna otoczka gwiaździsta wokół podzbioru punktów `idx` (patrz `addCrownShell`) */
+function buildShellHull(
+  field: LeafSiteField,
+  P: Float64Array,
+  M: Float64Array,
+  idx: number[],
+  bands: number,
+  sectors: number,
+  prng: FastPrng,
+  leaf: number
+): ShellHull {
+  const nPts = idx.length;
+  const isLeaf = (i: number) => idx[i] < field.count;
+  const xs: number[] = [], ys: number[] = [], zs: number[] = [], ly: number[] = [];
+  for (let i = 0; i < nPts; i++) {
+    const q = idx[i];
+    xs.push(P[q * 3]); ys.push(P[q * 3 + 1]); zs.push(P[q * 3 + 2]);
+    if (isLeaf(i)) ly.push(P[q * 3 + 1]);
+  }
+  const qr = (a: number[], f: number) => {
+    const s = a.slice().sort((p, q) => p - q);
+    return s[Math.min(s.length - 1, Math.floor(f * (s.length - 1)))];
+  };
+  // Środek i półosie z przyciętego zakresu (2–98%), podstawa korony z wysokości liści
+  const loX = qr(xs, 0.02), hiX = qr(xs, 0.98), loY = qr(ys, 0.02), hiY = qr(ys, 0.98), loZ = qr(zs, 0.02), hiZ = qr(zs, 0.98);
+  const ox = (loX + hiX) / 2, oy = (loY + hiY) / 2, oz = (loZ + hiZ) / 2;
+  const ax = Math.max(leaf, (hiX - loX) / 2, (hiZ - loZ) / 2), ay = Math.max(leaf, (hiY - loY) / 2);
+  const baseY = ly.length > 0 ? qr(ly, SHELL_BASE_PERCENTILE) : loY;
+
+  const nVerts = (bands - 1) * sectors + 2;
+  const last = nVerts - 1;
+  const ux = new Float64Array(nVerts), uy = new Float64Array(nVerts), uz = new Float64Array(nVerts);
+  const nbr: number[][] = [];
+  const ringOf = (r: number, j: number) => 1 + (r - 1) * sectors + ((j + sectors) % sectors);
+  for (let v = 0; v < nVerts; v++) {
+    let theta = 0, phi = 0;
+    if (v === last) theta = Math.PI;
+    else if (v > 0) {
+      theta = (Math.PI * (1 + Math.floor((v - 1) / sectors))) / bands;
+      phi = (((v - 1) % sectors) / sectors) * Math.PI * 2;
+    }
+    ux[v] = Math.sin(theta) * Math.cos(phi);
+    uy[v] = Math.cos(theta);
+    uz[v] = Math.sin(theta) * Math.sin(phi);
+    const list: number[] = [];
+    if (v === 0) for (let j = 0; j < sectors; j++) list.push(ringOf(1, j));
+    else if (v === last) for (let j = 0; j < sectors; j++) list.push(ringOf(bands - 1, j));
+    else {
+      const r = 1 + Math.floor((v - 1) / sectors), j = (v - 1) % sectors;
+      list.push(ringOf(r, j - 1), ringOf(r, j + 1), r === 1 ? 0 : ringOf(r - 1, j), r === bands - 1 ? last : ringOf(r + 1, j));
+    }
+    nbr.push(list);
+  }
+
+  // Promień: percentyl odległości punktów w stożku (liście i gałęzie osobno, większy z nich); jasność: średnia pola światła
+  const cone = Math.cos(Math.max(Math.PI / bands, (Math.PI * 2) / sectors) * 0.75);
+  const R = new Float64Array(nVerts).fill(-1);
+  const lightSum = new Float64Array(nVerts), lightN = new Float64Array(nVerts);
+  const dl: number[][] = Array.from({ length: nVerts }, () => []);
+  const db: number[][] = Array.from({ length: nVerts }, () => []);
+  for (let i = 0; i < nPts; i++) {
+    const q = idx[i];
+    const dx = (P[q * 3] - ox) / ax, dy = (P[q * 3 + 1] - oy) / ay, dz = (P[q * 3 + 2] - oz) / ax;
+    const len = Math.hypot(dx, dy, dz) || 1e-9;
+    const nx = dx / len, ny = dy / len, nz = dz / len;
+    const phys = Math.hypot(nx * ax, ny * ay, nz * ax) || 1e-9;
+    const pr = len + M[q] / phys;
+    for (let v = 0; v < nVerts; v++) {
+      if (nx * ux[v] + ny * uy[v] + nz * uz[v] < cone) continue;
+      (isLeaf(i) ? dl : db)[v].push(pr);
+      if (isLeaf(i)) { lightSum[v] += field.shade[q]; lightN[v]++; }
+    }
+  }
+  let meanShade = 0;
+  for (let i = 0; i < field.count; i++) meanShade += field.shade[i] / field.count;
+  const light = new Float64Array(nVerts);
+  for (let v = 0; v < nVerts; v++) {
+    R[v] = Math.max(quantile(dl[v], SHELL_PERCENTILE), quantile(db[v], SHELL_PERCENTILE));
+    light[v] = lightN[v] > 0 ? lightSum[v] / lightN[v] : meanShade;
+  }
+  for (let pass = 0; pass < nVerts; pass++) {
+    let missing = 0;
+    const next = R.slice();
+    for (let v = 0; v < nVerts; v++) {
+      if (R[v] >= 0) continue;
+      let sum = 0, k = 0;
+      for (const w of nbr[v]) if (R[w] >= 0) { sum += R[w]; k++; }
+      if (k > 0) next[v] = sum / k; else missing++;
+    }
+    R.set(next);
+    if (missing === 0) break;
+  }
+  for (let v = 0; v < nVerts; v++) if (R[v] < 0) R[v] = 1;
+  for (let pass = 0; pass < 2; pass++) {
+    const next = R.slice();
+    for (let v = 0; v < nVerts; v++) {
+      let avg = 0;
+      for (const w of nbr[v]) avg += R[w] / nbr[v].length;
+      next[v] = Math.max(R[v], SHELL_SMOOTH * avg);
+    }
+    R.set(next);
+  }
+  // Zaokrąglone bieguny: promień bieguna nie przekracza średniej pierwszego pasa (kolumnowe korony bez szpica)
+  for (const pole of [0, last]) {
+    let avg = 0;
+    for (const w of nbr[pole]) avg += R[w] / nbr[pole].length;
+    R[pole] = Math.min(R[pole], avg * SHELL_POLE);
+  }
+  for (let v = 0; v < nVerts; v++) R[v] *= 1 + prng.range(0, SHELL_NOISE);
+
+  const faces: number[] = [];
+  for (let j = 0; j < sectors; j++) {
+    const j1 = (j + 1) % sectors;
+    faces.push(0, 1 + j1, 1 + j);
+    for (let r = 1; r + 1 < bands; r++) {
+      const a = ringOf(r, j), b = ringOf(r, j1), c = ringOf(r + 1, j), d = ringOf(r + 1, j1);
+      faces.push(a, b, d, a, d, c);
+    }
+    faces.push(last, ringOf(bands - 1, j), ringOf(bands - 1, j1));
+  }
+
+  // Spód: miękkie ścięcie na podstawie korony (zejście poniżej podstawy ≤ ~SHELL_BASE_SOFT wysokości bryły)
+  const soft = Math.max(1e-6, SHELL_BASE_SOFT * (hiY - loY));
+  const px = new Float64Array(nVerts), py = new Float64Array(nVerts), pz = new Float64Array(nVerts);
+  for (let v = 0; v < nVerts; v++) {
+    px[v] = ox + ux[v] * R[v] * ax;
+    let y = oy + uy[v] * R[v] * ay;
+    if (y < baseY) y = baseY - soft * Math.tanh((baseY - y) / soft);
+    py[v] = y;
+    pz[v] = oz + uz[v] * R[v] * ax;
+  }
+  return { px, py, pz, faces, light };
 }

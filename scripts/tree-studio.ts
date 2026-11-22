@@ -35,6 +35,7 @@ import {
   type TreeKind,
 } from '${path.resolve('src/core/treeSpeciesRegistry').replace(/\\\\/g, '/')}';
 import {
+  evalParameterCurve,
   fitParameterCurve,
   profileAtHeight,
   resolveNumericParam,
@@ -118,17 +119,14 @@ function getEffectiveProfile(kind: TreeKind, h: number): { profile: SpeciesProfi
     const d = Math.abs(ah - h);
     if (d < bestD) { bestD = d; nearest = ah; }
   }
-  if (exact !== undefined) {
-    return { profile: structuredClone(map.get(exact)!), isExactAnchor: true, nearestAnchor: exact };
-  }
   const anchors = heights.map((ah) => ({ h: ah, profile: map.get(ah)! }));
-  return { profile: profileAtHeight(anchors, h), isExactAnchor: false, nearestAnchor: nearest };
+  return { profile: profileAtHeight(anchors, h), isExactAnchor: exact !== undefined, nearestAnchor: nearest };
 }
 
 // Three.js setup
 const canvas = document.getElementById('gl-canvas') as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-renderer.setClearColor(0xfcfbf9, 1.0);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0.0);
 
 const barkMat = new THREE.MeshBasicMaterial({ color: 0xb88d66, side: THREE.DoubleSide });
 const leafMats = [
@@ -366,7 +364,7 @@ function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle:
     samples.push({ h, y: fit.eval(h) });
   }
   const effProf = getEffectiveProfile(currentKind, currentHeight).profile;
-  const curY = getParamValue(effProf, sectionTitle, label) ?? fit.eval(currentHeight);
+  const curY = getParamValue(effProf, sectionTitle, label) ?? evalParameterCurve(fit, currentHeight, label);
   const allY = [...pts.map((p) => p.y), ...samples.map((s) => s.y), curY];
   let minY = Math.min(...allY);
   let maxY = Math.max(...allY);
@@ -435,6 +433,8 @@ function applyWindDeformation(timeSec: number) {
   }
   currentMesh = new THREE.Mesh(toThreeBufferGeometry(rawRes.mesh), [barkMat, ...leafMats]);
   treeGroup.add(currentMesh);
+  lastRawMesh = rawRes.mesh;
+  syncEdges();
   renderer.render(scene, currentCamera);
 }
 
@@ -447,6 +447,299 @@ function startWindLoop() {
     windRafId = requestAnimationFrame(tick);
   };
   windRafId = requestAnimationFrame(tick);
+}
+
+interface BgTransform {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  opacity: number;
+  visible: boolean;
+}
+interface BgTierEntry extends BgTransform {
+  fileName: string;
+  dataUrl: string;
+}
+interface BgStoragePayload {
+  byTier: Record<string, BgTierEntry>;
+  byFile: Record<string, BgTransform>;
+}
+
+const BG_STORAGE_KEY = 'usi-tree-studio-bg-v1';
+let bgStorage: BgStoragePayload = { byTier: {}, byFile: {} };
+const bgImageCache = new Map<string, HTMLImageElement>();
+let bgPersistTimer: number | null = null;
+let lastViewMetrics = { w: 1, hPx: 1, cx: 0, cy: 0, frustumW: 1, frustumH: 1 };
+
+function getCurrentTierH(): number {
+  return getEffectiveProfile(currentKind, currentHeight).nearestAnchor;
+}
+
+function getBgTierKey(): string {
+  return \`\${currentKind}:\${getCurrentTierH()}\`;
+}
+
+function saveBgToLocalStorage() {
+  try {
+    localStorage.setItem(BG_STORAGE_KEY, JSON.stringify(bgStorage));
+  } catch {}
+}
+
+function scheduleBgServerSave() {
+  if (bgPersistTimer !== null) clearTimeout(bgPersistTimer);
+  bgPersistTimer = window.setTimeout(() => {
+    fetch('/api/studio-bg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bgStorage),
+    }).catch(() => {});
+  }, 250);
+}
+
+function updateBgEntryAndPersist(entry: BgTierEntry) {
+  bgStorage.byTier[getBgTierKey()] = entry;
+  bgStorage.byFile[entry.fileName] = {
+    scale: entry.scale,
+    offsetX: entry.offsetX,
+    offsetY: entry.offsetY,
+    opacity: entry.opacity,
+    visible: entry.visible,
+  };
+  saveBgToLocalStorage();
+  scheduleBgServerSave();
+}
+
+async function loadBgStorage() {
+  try {
+    const raw = localStorage.getItem(BG_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        bgStorage = { byTier: parsed.byTier || {}, byFile: parsed.byFile || {} };
+      }
+    }
+  } catch {}
+  try {
+    const res = await fetch('/api/studio-bg');
+    if (res.ok) {
+      const srv = await res.json();
+      if (srv && typeof srv === 'object') {
+        bgStorage = {
+          byTier: { ...(bgStorage.byTier || {}), ...(srv.byTier || {}) },
+          byFile: { ...(bgStorage.byFile || {}), ...(srv.byFile || {}) },
+        };
+        saveBgToLocalStorage();
+      }
+    }
+  } catch {}
+  drawBackgroundCanvas();
+  syncBgControls();
+}
+
+function drawBackgroundCanvas() {
+  const bg = document.getElementById('bg-canvas') as HTMLCanvasElement | null;
+  if (!bg) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const w = wrap ? wrap.clientWidth : lastViewMetrics.w;
+  const hPx = wrap ? wrap.clientHeight : lastViewMetrics.hPx;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (bg.width !== Math.round(w * dpr) || bg.height !== Math.round(hPx * dpr)) {
+    bg.width = Math.round(w * dpr);
+    bg.height = Math.round(hPx * dpr);
+  }
+  const ctx = bg.getContext('2d');
+  if (!ctx) return;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, hPx);
+
+  const entry = bgStorage.byTier[getBgTierKey()];
+  if (!entry || !entry.visible || !entry.dataUrl) {
+    ctx.restore();
+    return;
+  }
+
+  let img = bgImageCache.get(entry.dataUrl);
+  if (!img) {
+    img = new Image();
+    img.onload = () => drawBackgroundCanvas();
+    img.src = entry.dataUrl;
+    bgImageCache.set(entry.dataUrl, img);
+  }
+  if (!img.complete || img.naturalWidth === 0) {
+    ctx.restore();
+    return;
+  }
+
+  const { cx, cy, frustumW, frustumH } = lastViewMetrics;
+  const worldToX = (wx: number) => ((wx - cx) / frustumW + 0.5) * w;
+  const worldToY = (wy: number) => (0.5 - (wy - cy) / frustumH) * hPx;
+  const tierH = getCurrentTierH();
+  const drawH = tierH * (hPx / Math.max(1e-6, frustumH)) * entry.scale;
+  const drawW = drawH * (img.naturalWidth / Math.max(1, img.naturalHeight));
+  const drawX = worldToX(entry.offsetX) - drawW * 0.5;
+  const drawY = worldToY(entry.offsetY) - drawH;
+
+  ctx.globalAlpha = Math.max(0, Math.min(1, entry.opacity));
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  ctx.restore();
+}
+
+function syncBgControls() {
+  const tierEl = document.getElementById('bg-tier-label');
+  if (tierEl) tierEl.textContent = \`\${getCurrentTierH()} m\`;
+  const entry = bgStorage.byTier[getBgTierKey()];
+  const fileEl = document.getElementById('bg-file-name');
+  if (fileEl) fileEl.textContent = entry ? entry.fileName : 'Brak pliku';
+  const visEl = document.getElementById('bg-visible') as HTMLInputElement | null;
+  if (visEl) visEl.checked = entry ? entry.visible : true;
+  const setPair = (idBase: string, val: number) => {
+    const r = document.getElementById(\`bg-\${idBase}-range\`) as HTMLInputElement | null;
+    const n = document.getElementById(\`bg-\${idBase}-num\`) as HTMLInputElement | null;
+    if (r) r.value = String(val);
+    if (n) n.value = String(Number(val.toFixed(3)));
+  };
+  setPair('scale', entry ? entry.scale : 1);
+  setPair('ox', entry ? entry.offsetX : 0);
+  setPair('oy', entry ? entry.offsetY : 0);
+  setPair('op', entry ? entry.opacity : 0.55);
+}
+
+function initBgControls() {
+  const fileInput = document.getElementById('bg-file-input') as HTMLInputElement | null;
+  if (fileInput) {
+    fileInput.onchange = () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        const prev = bgStorage.byFile[file.name];
+        const entry: BgTierEntry = prev
+          ? { ...prev, visible: true, fileName: file.name, dataUrl }
+          : { scale: 1, offsetX: 0, offsetY: 0, opacity: 0.55, visible: true, fileName: file.name, dataUrl };
+        updateBgEntryAndPersist(entry);
+        drawBackgroundCanvas();
+        syncBgControls();
+      };
+      reader.readAsDataURL(file);
+    };
+  }
+  const clearBtn = document.getElementById('bg-clear-btn');
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      delete bgStorage.byTier[getBgTierKey()];
+      saveBgToLocalStorage();
+      scheduleBgServerSave();
+      drawBackgroundCanvas();
+      syncBgControls();
+    };
+  }
+  const visEl = document.getElementById('bg-visible') as HTMLInputElement | null;
+  if (visEl) {
+    visEl.onchange = () => {
+      const entry = bgStorage.byTier[getBgTierKey()];
+      if (!entry) return;
+      entry.visible = visEl.checked;
+      updateBgEntryAndPersist(entry);
+      drawBackgroundCanvas();
+    };
+  }
+  const bindPair = (idBase: string, field: keyof BgTransform) => {
+    const r = document.getElementById(\`bg-\${idBase}-range\`) as HTMLInputElement | null;
+    const n = document.getElementById(\`bg-\${idBase}-num\`) as HTMLInputElement | null;
+    const apply = (raw: string) => {
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v)) return;
+      const entry = bgStorage.byTier[getBgTierKey()];
+      if (!entry) return;
+      (entry[field] as number) = v;
+      updateBgEntryAndPersist(entry);
+      drawBackgroundCanvas();
+      syncBgControls();
+    };
+    if (r) r.oninput = () => apply(r.value);
+    if (n) n.oninput = () => apply(n.value);
+  };
+  bindPair('scale', 'scale');
+  bindPair('ox', 'offsetX');
+  bindPair('oy', 'offsetY');
+  bindPair('op', 'opacity');
+  const resetBtn = document.getElementById('bg-reset-btn');
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      const entry = bgStorage.byTier[getBgTierKey()];
+      if (!entry) return;
+      entry.scale = 1;
+      entry.offsetX = 0;
+      entry.offsetY = 0;
+      updateBgEntryAndPersist(entry);
+      drawBackgroundCanvas();
+      syncBgControls();
+    };
+  }
+}
+
+// Krawędzie face'ów i statystyki pierścieni
+const EDGE_STORAGE_KEY = 'usi-tree-studio-edges';
+let edgesBark = false;
+let edgesLeaves = false;
+try {
+  const e = JSON.parse(localStorage.getItem(EDGE_STORAGE_KEY) || '{}');
+  edgesBark = !!e.bark;
+  edgesLeaves = !!e.leaves;
+} catch { /* brak localStorage */ }
+let edgeLines: THREE.LineSegments[] = [];
+let lastRawMesh: { positions: Float32Array; indices: Uint16Array | Uint32Array; groups: { start: number; count: number; materialIndex: number }[] } | null = null;
+const barkEdgeMat = new THREE.LineBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.85 });
+const leafEdgeMat = new THREE.LineBasicMaterial({ color: 0x14532d, transparent: true, opacity: 0.6 });
+barkMat.polygonOffset = true; barkMat.polygonOffsetFactor = 1; barkMat.polygonOffsetUnits = 1;
+for (const m of leafMats) { m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; }
+
+function clearEdges() {
+  for (const l of edgeLines) { treeGroup.remove(l); l.geometry.dispose(); }
+  edgeLines = [];
+}
+function buildEdges(positions: Float32Array, idx: ArrayLike<number>, mat: THREE.LineBasicMaterial) {
+  if (idx.length === 0) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx as ArrayLike<number>), 1));
+  const wf = new THREE.WireframeGeometry(g);
+  g.dispose();
+  const l = new THREE.LineSegments(wf, mat);
+  treeGroup.add(l);
+  edgeLines.push(l);
+}
+function syncEdges() {
+  clearEdges();
+  const m = lastRawMesh;
+  if (!m || (!edgesBark && !edgesLeaves)) return;
+  const barkCount = m.groups.length > 0 ? m.groups[0].count : m.indices.length;
+  if (edgesBark) buildEdges(m.positions, m.indices.subarray(0, barkCount), barkEdgeMat);
+  if (edgesLeaves) buildEdges(m.positions, m.indices.subarray(barkCount), leafEdgeMat);
+}
+
+type RingStat = { level: number; sides: number; rings: number; ribbon: boolean };
+function renderRingInfo(stems: RingStat[], vertices: number, tris: { bark: number; foliage: number; total: number }, nCfgLevels: number) {
+  const el = document.getElementById('ring-info');
+  if (!el) return;
+  const byLevel = new Map<number, { n: number; rings: number; max: number; sides: Set<number>; ribbon: boolean; tris: number }>();
+  for (const s of stems) {
+    const e = byLevel.get(s.level) ?? { n: 0, rings: 0, max: 0, sides: new Set<number>(), ribbon: false, tris: 0 };
+    e.n++; e.rings += s.rings; e.max = Math.max(e.max, s.rings); e.sides.add(s.sides); e.ribbon = e.ribbon || s.ribbon;
+    // kora: tuba = 2*boki trójkątów na pasmo; wstęga = 2 na pasmo
+    e.tris += s.ribbon ? 2 * Math.max(0, s.rings - 1) : 2 * s.sides * Math.max(0, s.rings - 1);
+    byLevel.set(s.level, e);
+  }
+  const rows = Array.from(byLevel.keys()).sort((a, b) => a - b).map((lv) => {
+    const e = byLevel.get(lv)!;
+    const sides = Array.from(e.sides).sort((a, b) => a - b).join('/') + (e.ribbon ? ' (wstęga)' : '');
+    return '<tr><td>L' + lv + (lv > nCfgLevels ? ' (witki auto)' : '') + '</td><td>' + e.n + '</td><td>' + e.rings + '</td><td>' + (e.rings / e.n).toFixed(1) + '/' + e.max + '</td><td>' + sides + '</td><td>~' + e.tris.toLocaleString() + '</td></tr>';
+  }).join('');
+  el.innerHTML =
+    '<table><thead><tr><th>poz.</th><th>pędy</th><th>pierśc.</th><th>śr./maks</th><th>boki</th><th>tri kory</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<div>Razem: kora ' + tris.bark.toLocaleString() + ' tri, liście ' + tris.foliage.toLocaleString() + ' tri, wierzchołki ' + vertices.toLocaleString() + '</div>';
 }
 
 function renderTree() {
@@ -493,9 +786,11 @@ function renderTree() {
   const wind = windEnabled && windStrength > 0
     ? { strength: windStrength, time: windMode === 'SWAY' ? performance.now() * 0.001 : undefined }
     : undefined;
+  const ringStats: RingStat[] = [];
   const rawRes = TreeGenerator.meshSkeletonRaw(currentSkeleton, {
     ...currentRenderOpts,
     wind,
+    onStem: (info) => ringStats.push(info),
   });
 
   if (currentMesh) {
@@ -506,6 +801,8 @@ function renderTree() {
   const geom = toThreeBufferGeometry(rawRes.mesh);
   currentMesh = new THREE.Mesh(geom, [barkMat, ...leafMats]);
   treeGroup.add(currentMesh);
+  lastRawMesh = rawRes.mesh;
+  syncEdges();
   treeGroup.rotation.y = (yawDeg * Math.PI) / 180;
 
   const [minX, minY] = rawRes.mesh.boundingBox.min;
@@ -534,6 +831,7 @@ function renderTree() {
 
   // Update stats bar
   const tris = countMeshTriangles(rawRes.mesh);
+  renderRingInfo(ringStats, rawRes.mesh.positions.length / 3, tris, profile.levels.length);
   const barkPct = tris.total > 0 ? Math.round((tris.bark / tris.total) * 100) : 0;
   const folPct = tris.total > 0 ? 100 - barkPct : 0;
   const actualH = rawRes.bounds.height;
@@ -551,7 +849,160 @@ function renderTree() {
     : \`Interpolacja pośrednia (log2 h) · edytuj najbliższy węzeł \${nearestAnchor} m\`;
   modeEl.className = isExactAnchor ? 'badge badge-green' : 'badge badge-blue';
 
+  lastViewMetrics = { w, hPx, cx, cy, frustumW, frustumH };
   drawOverlayGuides(w, hPx, cx, cy, frustumW, frustumH, profile);
+  drawBackgroundCanvas();
+  syncBgControls();
+  schedulePixelFillChart();
+}
+
+const PIXEL_FILL_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
+const PIXEL_FILL_LODS: Array<{ key: keyof typeof TREE_LOD_PRESETS; label: string; color: string }> = [
+  { key: 'near', label: 'near', color: '#16a34a' },
+  { key: 'mid', label: 'mid', color: '#2563eb' },
+  { key: 'far', label: 'far', color: '#d97706' },
+  { key: 'shell', label: 'shell', color: '#dc2626' },
+];
+let pixelFillRes = 128;
+let pixelFillTimer: number | null = null;
+let pixelFillRt: THREE.WebGLRenderTarget | null = null;
+let pixelFillBuf: Uint8Array | null = null;
+const offscreenScene = new THREE.Scene();
+
+function schedulePixelFillChart() {
+  if (windEnabled && windStrength > 0 && windMode === 'SWAY') return;
+  if (pixelFillTimer !== null) window.clearTimeout(pixelFillTimer);
+  pixelFillTimer = window.setTimeout(() => {
+    pixelFillTimer = null;
+    updatePixelFillChart();
+  }, 120);
+}
+
+function measureLodPixelFill(): Record<string, number[]> | null {
+  if (!currentSkeleton || !currentCamera || !currentRenderOpts) return null;
+  const rect = canvas.parentElement!.getBoundingClientRect();
+  const w = Math.max(320, Math.floor(rect.width));
+  const hPx = Math.max(320, Math.floor(rect.height));
+  const aspect = w / hPx;
+  const rtH = pixelFillRes;
+  const rtW = Math.max(64, Math.round(rtH * aspect));
+
+  if (!pixelFillRt || pixelFillRt.width !== rtW || pixelFillRt.height !== rtH) {
+    pixelFillRt?.dispose();
+    pixelFillRt = new THREE.WebGLRenderTarget(rtW, rtH, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat,
+    });
+    pixelFillBuf = new Uint8Array(rtW * rtH * 4);
+  }
+  const buf = pixelFillBuf!;
+  const totalPixels = rtW * rtH;
+
+  const wind = windEnabled && windStrength > 0
+    ? { strength: windStrength, time: windMode === 'SWAY' ? performance.now() * 0.001 : undefined }
+    : undefined;
+
+  const results: Record<string, number[]> = {};
+  renderer.setRenderTarget(pixelFillRt);
+  renderer.setClearColor(0x000000, 0.0);
+
+  for (const lodDef of PIXEL_FILL_LODS) {
+    const rawRes = TreeGenerator.meshSkeletonRaw(currentSkeleton, {
+      ...currentRenderOpts,
+      lod: { ...TREE_LOD_PRESETS[lodDef.key] },
+      wind,
+    });
+    const geom = toThreeBufferGeometry(rawRes.mesh);
+    const mesh = new THREE.Mesh(geom, [barkMat, ...leafMats]);
+    offscreenScene.add(mesh);
+
+    const series: number[] = [];
+    for (const deg of PIXEL_FILL_ANGLES) {
+      mesh.rotation.y = (deg * Math.PI) / 180;
+      renderer.clear();
+      renderer.render(offscreenScene, currentCamera);
+      renderer.readRenderTargetPixels(pixelFillRt, 0, 0, rtW, rtH, buf);
+      let filled = 0;
+      for (let i = 3; i < buf.length; i += 4) {
+        if (buf[i] > 0) filled++;
+      }
+      series.push((filled / totalPixels) * 100);
+    }
+
+    offscreenScene.remove(mesh);
+    geom.dispose();
+    results[lodDef.key] = series;
+  }
+
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(0x000000, 0.0);
+  return results;
+}
+
+function updatePixelFillChart() {
+  const svg = document.getElementById('pixel-fill-chart-svg');
+  const legendEl = document.getElementById('pixel-fill-legend');
+  if (!svg) return;
+
+  const data = measureLodPixelFill();
+  if (!data) {
+    svg.innerHTML = '';
+    return;
+  }
+
+  const W = 310;
+  const H = 180;
+  const padL = 36;
+  const padR = 10;
+  const padT = 12;
+  const padB = 24;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  let maxPct = 5;
+  for (const lodDef of PIXEL_FILL_LODS) {
+    for (const v of data[lodDef.key]) {
+      if (v > maxPct) maxPct = v;
+    }
+  }
+  const yMax = Math.min(100, Math.ceil(maxPct / 5) * 5 || 10);
+
+  const xFor = (idx: number) => padL + (idx / (PIXEL_FILL_ANGLES.length - 1)) * plotW;
+  const yFor = (pct: number) => padT + plotH - (pct / yMax) * plotH;
+
+  let gridHtml = '';
+  for (let i = 0; i <= 4; i++) {
+    const val = (yMax * i) / 4;
+    const y = yFor(val);
+    gridHtml += \`<line x1="\${padL}" y1="\${y.toFixed(1)}" x2="\${W - padR}" y2="\${y.toFixed(1)}" stroke="#e4e2dc" stroke-width="1" />\`;
+    gridHtml += \`<text x="\${padL - 4}" y="\${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#71717a">\${val.toFixed(0)}%</text>\`;
+  }
+
+  let xLabelsHtml = '';
+  PIXEL_FILL_ANGLES.forEach((deg, idx) => {
+    const x = xFor(idx);
+    gridHtml += \`<line x1="\${x.toFixed(1)}" y1="\${padT}" x2="\${x.toFixed(1)}" y2="\${padT + plotH}" stroke="#f1efe9" stroke-width="1" />\`;
+    xLabelsHtml += \`<text x="\${x.toFixed(1)}" y="\${H - 6}" text-anchor="middle" font-size="9" fill="#71717a">\${deg}°</text>\`;
+  });
+
+  let linesHtml = '';
+  for (const lodDef of PIXEL_FILL_LODS) {
+    const vals = data[lodDef.key];
+    const pts = vals.map((v, idx) => \`\${xFor(idx).toFixed(1)},\${yFor(v).toFixed(1)}\`).join(' ');
+    linesHtml += \`<polyline fill="none" stroke="\${lodDef.color}" stroke-width="1.8" points="\${pts}" />\`;
+    vals.forEach((v, idx) => {
+      linesHtml += \`<circle cx="\${xFor(idx).toFixed(1)}" cy="\${yFor(v).toFixed(1)}" r="2.3" fill="\${lodDef.color}"><title>\${lodDef.label} @ \${PIXEL_FILL_ANGLES[idx]}°: \${v.toFixed(1)}%</title></circle>\`;
+    });
+  }
+
+  svg.innerHTML = gridHtml + xLabelsHtml + linesHtml;
+  if (legendEl) {
+    legendEl.innerHTML = PIXEL_FILL_LODS.map((l) => {
+      const avg = data[l.key].reduce((a, b) => a + b, 0) / data[l.key].length;
+      return \`<span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:10px;height:3px;background:\${l.color};display:inline-block;"></span>\${l.label} (\${avg.toFixed(1)}%)</span>\`;
+    }).join('');
+  }
 }
 
 function drawOverlayGuides(
@@ -602,7 +1053,7 @@ function drawOverlayGuides(
       for (let i = 0; i <= steps; i++) {
         const t = (i / steps) * tMax;
         const wy = (env.base + t * (1 - env.base)) * currentHeight;
-        const wr = env.spread * crownRatio(env.shape, t, env.peak) * currentHeight * sign;
+        const wr = env.spread * env.ratioAt(t) * currentHeight * sign;
         const px = worldToX(wr);
         const py = worldToY(wy);
         if (i === 0) ctx.moveTo(px, py);
@@ -744,7 +1195,7 @@ function buildParamInputs() {
   };
 
   addSection('Pień i korona', [
-    { label: 'crownShape', type: 'select', value: profile.crownShape, options: CROWN_SHAPES, onChange: (v) => updateField((p, x) => (p.crownShape = x), v) },
+    { label: 'crownShape', type: 'select', value: profile.crownShape, options: CROWN_SHAPES, onChange: (v) => updateField((p, x) => { p.crownShape = x; delete p.crownShapeB; delete p.crownShapeBlend; }, v) },
     { label: 'envelopeClipProbability', type: 'number', step: 0.05, min: 0, max: 1, value: profile.envelopeClipProbability ?? 0.72, onChange: (v) => updateField((p, x) => (p.envelopeClipProbability = x), v) },
     { label: 'crownSpreadRatio', type: 'number', step: 0.01, min: 0.05, max: 1.5, value: profile.crownSpreadRatio, onChange: (v) => updateField((p, x) => (p.crownSpreadRatio = x), v) },
     { label: 'crownPeak', type: 'number', step: 0.05, min: 0.05, max: 0.95, value: resolveNumericParam(profile, null, 'crownPeak') ?? 0.4, onChange: (v) => updateField((p, x) => (p.crownPeak = x), v) },
@@ -753,6 +1204,8 @@ function buildParamInputs() {
     { label: 'trunkLengthRatio', type: 'number', step: 0.02, min: 0.2, max: 1.0, value: profile.trunkLengthRatio, onChange: (v) => updateField((p, x) => (p.trunkLengthRatio = x), v) },
     { label: 'trunkTipRatio', type: 'number', step: 0.01, min: 0.01, max: 0.5, value: resolveNumericParam(profile, null, 'trunkTipRatio') ?? 0.3, onChange: (v) => updateField((p, x) => (p.trunkTipRatio = x), v) },
     { label: 'taperShape', type: 'number', step: 0.05, min: 0, max: 1, value: profile.taperShape ?? 0, onChange: (v) => updateField((p, x) => { if (x > 0) p.taperShape = x; else delete p.taperShape; }, v) },
+    { label: 'trunkSegmentDecay', type: 'number', step: 0.01, min: 0.5, max: 1, value: profile.trunkSegmentDecay ?? 1, onChange: (v) => updateField((p, x) => { if (x < 1) p.trunkSegmentDecay = x; else delete p.trunkSegmentDecay; }, v) },
+    { label: 'trunkMinSegmentRatio', type: 'number', step: 0.001, min: 0, max: 0.5, value: profile.trunkMinSegmentRatio ?? 0, onChange: (v) => updateField((p, x) => { if (x >= 1e-4) p.trunkMinSegmentRatio = Math.min(0.5, x); else delete p.trunkMinSegmentRatio; }, v) },
     { label: 'trunkCurveV', type: 'number', step: 0.5, min: 0, max: 30, value: profile.trunkCurveV, onChange: (v) => updateField((p, x) => (p.trunkCurveV = x), v) },
     { label: 'ratioPower', type: 'number', step: 0.05, min: 0.5, max: 2.5, value: profile.ratioPower, onChange: (v) => updateField((p, x) => (p.ratioPower = x), v) },
     { label: 'flareFactor', type: 'number', step: 0.02, min: 1.0, max: 2.0, value: profile.flareFactor, onChange: (v) => updateField((p, x) => (p.flareFactor = x), v) },
@@ -806,6 +1259,8 @@ function buildParamInputs() {
       { label: 'tropism', type: 'number', step: 0.05, min: -3, max: 1, value: lvl.tropism, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tropism = x; }, v) },
       { label: 'fork', type: 'number', step: 1, min: 0, max: 60, value: lvl.fork, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].fork = x; }, v) },
       { label: 'taperShape', type: 'number', step: 0.05, min: 0, max: 1, value: lvl.taperShape ?? profile.taperShape ?? 0, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].taperShape = x; }, v) },
+      { label: 'segmentDecay', type: 'number', step: 0.01, min: 0.5, max: 1, value: lvl.segmentDecay ?? 1, onChange: (v) => updateField((p, x) => { if (!p.levels[idx]) return; if (x < 1) p.levels[idx].segmentDecay = x; else delete p.levels[idx].segmentDecay; }, v) },
+      { label: 'minSegmentRatio', type: 'number', step: 0.001, min: 0, max: 0.5, value: lvl.minSegmentRatio ?? 0, onChange: (v) => updateField((p, x) => { if (!p.levels[idx]) return; if (x >= 1e-4) p.levels[idx].minSegmentRatio = Math.min(0.5, x); else delete p.levels[idx].minSegmentRatio; }, v) },
       { label: 'tipRatio', type: 'number', step: 0.02, min: 0.05, max: 1, value: resolveNumericParam(profile, idx, 'tipRatio') ?? 0.22, onChange: (v) => updateField((p, x) => { if (p.levels[idx]) p.levels[idx].tipRatio = x; }, v) },
     ]);
   });
@@ -843,6 +1298,10 @@ function initEvents() {
     currentLod = (e.target as HTMLSelectElement).value;
     renderTree();
   };
+  (document.getElementById('pixel-fill-res') as HTMLSelectElement).onchange = (e) => {
+    pixelFillRes = Number((e.target as HTMLSelectElement).value) || 128;
+    updatePixelFillChart();
+  };
   (document.getElementById('foliage-check') as HTMLInputElement).onchange = (e) => {
     showFoliage = (e.target as HTMLInputElement).checked;
     renderTree();
@@ -871,6 +1330,20 @@ function initEvents() {
   windSel.onchange = syncWind;
   windRng.oninput = syncWind;
 
+  const edgesBarkEl = document.getElementById('edges-bark') as HTMLInputElement;
+  const edgesLeavesEl = document.getElementById('edges-leaves') as HTMLInputElement;
+  edgesBarkEl.checked = edgesBark;
+  edgesLeavesEl.checked = edgesLeaves;
+  const onEdgesChange = () => {
+    edgesBark = edgesBarkEl.checked;
+    edgesLeaves = edgesLeavesEl.checked;
+    try { localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify({ bark: edgesBark, leaves: edgesLeaves })); } catch { /* ignore */ }
+    syncEdges();
+    if (currentCamera) renderer.render(scene, currentCamera);
+  };
+  edgesBarkEl.onchange = onEdgesChange;
+  edgesLeavesEl.onchange = onEdgesChange;
+
   const seedInp = document.getElementById('seed-input') as HTMLInputElement;
   seedInp.oninput = () => {
     currentSeed = parseInt(seedInp.value, 10) || 1;
@@ -897,18 +1370,55 @@ function initEvents() {
     renderTree();
   };
 
-  // Drag canvas to rotate Y
+  // Drag canvas to rotate Y or pan background
   let dragging = false;
+  let draggingBg = false;
   let lastX = 0;
-  canvas.onmousedown = (e) => { dragging = true; lastX = e.clientX; };
-  window.onmouseup = () => { dragging = false; };
+  let lastY = 0;
+  canvas.onmousedown = (e) => {
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    const bgDragEl = document.getElementById('bg-drag-mode') as HTMLInputElement | null;
+    draggingBg = Boolean((bgDragEl && bgDragEl.checked) || e.shiftKey);
+  };
+  window.onmouseup = () => { dragging = false; draggingBg = false; };
   window.onmousemove = (e) => {
     if (!dragging || !currentCamera) return;
+    if (draggingBg) {
+      const entry = bgStorage.byTier[getBgTierKey()];
+      if (entry) {
+        const rect = canvas.getBoundingClientRect();
+        const frustumH = currentCamera.top - currentCamera.bottom;
+        const mPerPx = frustumH / Math.max(1, rect.height);
+        entry.offsetX += (e.clientX - lastX) * mPerPx;
+        entry.offsetY -= (e.clientY - lastY) * mPerPx;
+        updateBgEntryAndPersist(entry);
+        drawBackgroundCanvas();
+        syncBgControls();
+      }
+      lastX = e.clientX;
+      lastY = e.clientY;
+      return;
+    }
     yawDeg = (yawDeg + (e.clientX - lastX) * 0.6) % 360;
     lastX = e.clientX;
+    lastY = e.clientY;
     treeGroup.rotation.y = (yawDeg * Math.PI) / 180;
     renderer.render(scene, currentCamera);
   };
+  canvas.addEventListener('wheel', (e) => {
+    const bgDragEl = document.getElementById('bg-drag-mode') as HTMLInputElement | null;
+    if (!((bgDragEl && bgDragEl.checked) || e.shiftKey)) return;
+    const entry = bgStorage.byTier[getBgTierKey()];
+    if (!entry) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.05 : 1 / 1.05;
+    entry.scale = Math.max(0.05, Math.min(20, entry.scale * factor));
+    updateBgEntryAndPersist(entry);
+    drawBackgroundCanvas();
+    syncBgControls();
+  }, { passive: false });
 
   document.getElementById('btn-reset')!.onclick = () => {
     editedAnchors.delete(currentKind);
@@ -971,6 +1481,8 @@ function initEvents() {
     }
   };
 
+  initBgControls();
+  loadBgStorage();
   window.onresize = () => renderTree();
 }
 
@@ -990,9 +1502,14 @@ const HTML_PAGE = `<!DOCTYPE html>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f3f1ec; color: #18181b; display: flex; height: 100vh; overflow: hidden; }
     #viewport { flex: 1; position: relative; background: #fcfbf9; display: flex; flex-direction: column; }
-    #canvas-wrap { flex: 1; position: relative; overflow: hidden; }
-    #gl-canvas, #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-    #overlay-canvas { pointer-events: none; }
+    #canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #fcfbf9; }
+    #bg-canvas, #gl-canvas, #overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #bg-canvas, #overlay-canvas { pointer-events: none; }
+    #edge-panel { position: absolute; top: 8px; left: 8px; z-index: 5; background: rgba(255,255,255,0.88); border: 1px solid #d4d0c7; border-radius: 6px; padding: 6px 8px; font: 11px ui-monospace, monospace; max-width: 340px; }
+    #edge-panel label { display: block; cursor: pointer; }
+    #ring-info table { border-collapse: collapse; margin-top: 4px; }
+    #ring-info th, #ring-info td { padding: 1px 6px; text-align: right; border-bottom: 1px solid #e5e2da; }
+    #ring-info div { margin-top: 4px; }
     #status-bar { padding: 8px 14px; background: #f3f1ec; border-top: 1px solid #d4d0c7; font: 12px ui-monospace, monospace; display: flex; justify-content: space-between; gap: 12px; }
     #sidebar { width: 20vw; min-width: 280px; background: #fff; border-left: 1px solid #d4d0c7; display: flex; flex-direction: column; }
     .hdr { padding: 12px 14px; border-bottom: 1px solid #e4e2dc; background: #f8f6f1; }
@@ -1040,8 +1557,14 @@ const HTML_PAGE = `<!DOCTYPE html>
 <body>
   <div id="viewport">
     <div id="canvas-wrap">
+      <canvas id="bg-canvas"></canvas>
       <canvas id="gl-canvas"></canvas>
       <canvas id="overlay-canvas"></canvas>
+    </div>
+    <div id="edge-panel">
+      <label><input type="checkbox" id="edges-bark"> Krawędzie face'ów (kora)</label>
+      <label><input type="checkbox" id="edges-leaves"> Krawędzie liści</label>
+      <div id="ring-info"></div>
     </div>
     <div id="status-bar">
       <span id="stats-tris">Trójkąty: —</span>
@@ -1106,6 +1629,37 @@ const HTML_PAGE = `<!DOCTYPE html>
   </aside>
   <aside id="right-panel">
     <div class="rp-card">
+      <h2>Tło referencyjne (<span id="bg-tier-label">15 m</span>)</h2>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;">
+        <input id="bg-file-input" type="file" accept="image/*" style="font-size:11px;" />
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <span id="bg-file-name" style="color:#52525b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Brak pliku</span>
+          <button id="bg-clear-btn" type="button" style="padding:2px 6px;font-size:10px;">Usuń</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input id="bg-visible" type="checkbox" checked /> Pokaż tło
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input id="bg-drag-mode" type="checkbox" /> Przesuwaj/skaluj tło myszką (lub Shift)
+        </label>
+        <div style="display:grid;grid-template-columns:62px 1fr 54px;gap:4px;align-items:center;">
+          <span>Skala</span>
+          <input id="bg-scale-range" type="range" min="0.1" max="5" step="0.01" value="1" />
+          <input id="bg-scale-num" type="number" min="0.05" max="20" step="0.01" value="1" style="padding:2px 4px;font-size:11px;" />
+          <span>Poz. X (m)</span>
+          <input id="bg-ox-range" type="range" min="-20" max="20" step="0.05" value="0" />
+          <input id="bg-ox-num" type="number" step="0.05" value="0" style="padding:2px 4px;font-size:11px;" />
+          <span>Poz. Y (m)</span>
+          <input id="bg-oy-range" type="range" min="-20" max="20" step="0.05" value="0" />
+          <input id="bg-oy-num" type="number" step="0.05" value="0" style="padding:2px 4px;font-size:11px;" />
+          <span>Krycie</span>
+          <input id="bg-op-range" type="range" min="0" max="1" step="0.01" value="0.55" />
+          <input id="bg-op-num" type="number" min="0" max="1" step="0.01" value="0.55" style="padding:2px 4px;font-size:11px;" />
+        </div>
+        <button id="bg-reset-btn" type="button" style="padding:3px 8px;font-size:11px;">Resetuj pozycję tła</button>
+      </div>
+    </div>
+    <div class="rp-card">
       <h2>Pora roku</h2>
       <div class="season-grid">
         <button class="season-btn" data-season="SPRING">Wiosna</button>
@@ -1142,6 +1696,19 @@ const HTML_PAGE = `<!DOCTYPE html>
       <svg id="inline-chart-svg" viewBox="0 0 310 180" width="100%" height="180"></svg>
       <div id="inline-chart-desc" class="rp-meta" style="text-align:left;margin-top:6px;"></div>
     </div>
+    <div class="rp-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h2 style="margin:0;">Wypełnienie widoku (piksele %)</h2>
+        <select id="pixel-fill-res" style="font-size:10px;padding:1px 4px;border:1px solid #d4d4d8;border-radius:4px;background:#fff;">
+          <option value="128" selected>128 px</option>
+          <option value="256">256 px</option>
+          <option value="512">512 px</option>
+          <option value="1024">1024 px</option>
+        </select>
+      </div>
+      <svg id="pixel-fill-chart-svg" viewBox="0 0 310 180" width="100%" height="180"></svg>
+      <div id="pixel-fill-legend" class="rp-meta" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:4px;"></div>
+    </div>
   </aside>
   <script src="/bundle.js"></script>
 </body>
@@ -1171,6 +1738,42 @@ async function main() {
       }).catch((err) => {
         resHttp.writeHead(500);
         resHttp.end(String(err));
+      });
+      return;
+    }
+    if (req.url === '/api/studio-bg' && req.method === 'GET') {
+      const bgPath = path.resolve('tmp/studio-backgrounds.json');
+      let data = { byTier: {}, byFile: {} };
+      if (fs.existsSync(bgPath)) {
+        try { data = JSON.parse(fs.readFileSync(bgPath, 'utf-8')); } catch {}
+      }
+      resHttp.writeHead(200, { 'Content-Type': 'application/json' });
+      resHttp.end(JSON.stringify(data));
+      return;
+    }
+    if (req.url === '/api/studio-bg' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          const bgPath = path.resolve('tmp/studio-backgrounds.json');
+          fs.mkdirSync(path.dirname(bgPath), { recursive: true });
+          let existing: { byTier: Record<string, unknown>; byFile: Record<string, unknown> } = { byTier: {}, byFile: {} };
+          if (fs.existsSync(bgPath)) {
+            try { existing = JSON.parse(fs.readFileSync(bgPath, 'utf-8')); } catch {}
+          }
+          const merged = {
+            byTier: { ...(existing.byTier || {}), ...(parsed.byTier || {}) },
+            byFile: { ...(existing.byFile || {}), ...(parsed.byFile || {}) },
+          };
+          fs.writeFileSync(bgPath, JSON.stringify(merged, null, 2));
+          resHttp.writeHead(200, { 'Content-Type': 'application/json' });
+          resHttp.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          resHttp.writeHead(400, { 'Content-Type': 'application/json' });
+          resHttp.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
       });
       return;
     }

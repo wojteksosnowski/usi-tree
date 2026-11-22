@@ -203,7 +203,7 @@ export class GrowthContext {
         const flareSpan = Math.max(2, Math.ceil(s.r.length * 0.25));
         for (let i = 0; i < Math.min(s.r.length, flareSpan); i++) {
           const u = i / flareSpan;
-          s.r[i] *= 1 + (profile.flareFactor - 1) * (1 - u) * (1 - u);
+          s.r[i] *= 1 + (Math.max(1, profile.flareFactor) - 1) * (1 - u) * (1 - u);
         }
       }
     }
@@ -283,6 +283,8 @@ export class GrowthContext {
           tropism: Math.abs(dy) < 0.97 ? this.leaderTropism : 0.3,
           fork: 0,
           kink: profile.trunkKink ?? 3,
+          segmentDecay: profile.trunkSegmentDecay,
+          minSegmentRatio: profile.trunkMinSegmentRatio,
         }
       : profile.levels[level - 1];
     const cp = profile.levels[level];
@@ -361,7 +363,7 @@ export class GrowthContext {
     }[] = [];
     if (cp) {
       const base = isTrunk
-        ? Math.max(0.03, (profile.trunkHeightRatio - oy) / Math.max(1e-6, length))
+        ? Math.min(0.85, Math.max(0.03, (profile.trunkHeightRatio - oy) / Math.max(1e-6, length)))
         : (cp.baseSize ?? 0.1);
       const count = isTrunk
         ? Math.max(2, Math.round(cp.count * this.trunkCountScale))
@@ -389,7 +391,13 @@ export class GrowthContext {
           : 2 * Math.PI * azOffset + i * rot! + planPrng.signedRange(rotJitter);
         let len: number;
         if (isTrunk) {
-          len = profile.crownSpreadRatio * crownRatio(profile.crownShape, (t - base) / Math.max(1e-6, 1 - base), profile.crownPeak);
+          len = (cp.lengthRatio ?? 1) * profile.crownSpreadRatio * crownRatio(
+            profile.crownShape,
+            (t - base) / Math.max(1e-6, 1 - base),
+            profile.crownPeak,
+            profile.crownShapeB,
+            profile.crownShapeBlend
+          );
         } else {
           len = cp.lengthRatio * length * (1 - 0.6 * t);
         }
@@ -418,7 +426,26 @@ export class GrowthContext {
 
     const res = Math.max(1, this.flow && !isTrunk ? p.curveRes * 2 : p.curveRes);
     const ts: number[] = [];
-    for (let i = 1; i <= res; i++) ts.push(i / res);
+    const segF = p.segmentDecay;
+    if (segF !== undefined && segF < 1) {
+      const f = Math.max(0.5, segF);
+      let n = res;
+      const minR = p.minSegmentRatio;
+      if (minR !== undefined && minR > 0) {
+        n = 1;
+        for (let m = 40; m >= 1; m--) {
+          if (m === 1 || ((1 - f) * Math.pow(f, m - 1)) / (1 - Math.pow(f, m)) >= minR) {
+            n = m;
+            break;
+          }
+        }
+      }
+      const denom = 1 - Math.pow(f, n);
+      for (let k = 1; k < n; k++) ts.push((1 - Math.pow(f, k)) / denom);
+      ts.push(1);
+    } else {
+      for (let i = 1; i <= res; i++) ts.push(i / res);
+    }
     for (const c of plan) ts.push(c.t);
     ts.sort((a, b) => a - b);
 
@@ -438,11 +465,44 @@ export class GrowthContext {
       : (p.tipRatio ?? (p.fork > 0 ? 0.35 : 0.22));
     const tipRatio = isTrunk
       ? tipRatioBase
-      : Math.max(0.12, tipRatioBase * (pruneFactor < 1 ? Math.pow(pruneFactor, 0.35) : 1));
+      : Math.max(MIN_RADIUS_RATIO, tipRatioBase * (pruneFactor < 1 ? Math.pow(pruneFactor, 0.35) : 1));
     // Kształt zwężania nie zmienia grubości czubka: 0 = liniowo, 1 = wykładniczo do tego samego czubka
     const shape = Math.min(1, Math.max(0, (isTrunk ? profile.taperShape : (p.taperShape ?? profile.taperShape)) ?? 0));
     const radiusAt = (tt: number) =>
       r0 * ((1 - shape) * (1 - tt * (1 - tipRatio)) + shape * Math.pow(tipRatio, tt));
+    const rTipTarget = radiusAt(1);
+    // Podłoga względna (połowa docelowego czubka), by cienkie pędy osiągały cel
+    const ringFloor = Math.min(MIN_RADIUS_RATIO * 0.6, rTipTarget * 0.5);
+    const targetAt = radiusAt;
+    {
+      // Dogęszczenie pierścieni, by krok promienia nie spadał poniżej 0.82 (cel osiągalny przy limicie ciągłości)
+      const out: number[] = [];
+      let left = 40;
+      let tp = 0;
+      for (const t1 of ts) {
+        const ra = radiusAt(tp),
+          rb = radiusAt(t1);
+        if (left > 0 && ra > 0 && rb / ra < 0.82 && t1 - tp > 1e-5) {
+          const m = Math.min(left + 1, Math.ceil(Math.log(rb / ra) / Math.log(0.82) - 1e-9));
+          for (let j = 1; j < m; j++) {
+            const goal = ra * Math.pow(rb / ra, j / m);
+            let lo = tp,
+              hi = t1;
+            for (let b = 0; b < 30; b++) {
+              const mid = (lo + hi) * 0.5;
+              if (radiusAt(mid) > goal) lo = mid;
+              else hi = mid;
+            }
+            out.push((lo + hi) * 0.5);
+            left--;
+          }
+        }
+        out.push(t1);
+        tp = t1;
+      }
+      ts.length = 0;
+      for (const v of out) ts.push(v);
+    }
 
     const stem: Stem = { level, px: [ox], py: [oy], pz: [oz], r: [r0], length, clipped: false };
     let x = ox,
@@ -555,8 +615,9 @@ export class GrowthContext {
             stem.py.push(y);
             stem.pz.push(z);
             const tClip = tPrev + dt * lo;
-            const rClipLinear = radiusAt(tClip);
-            stem.r.push(Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rClipLinear)));
+            stem.r.push(
+              Math.min(r, Math.max(ringFloor, r * 0.82, targetAt(tClip)))
+            );
           }
           stem.length = length * (tPrev + dt * lo);
           break;
@@ -564,8 +625,7 @@ export class GrowthContext {
         x = nx;
         y = Math.max(0.01, ny);
         z = nz;
-        const rLinear = radiusAt(t);
-        r = Math.min(r, Math.max(MIN_RADIUS_RATIO * 0.6, r * 0.82, rLinear));
+        r = Math.min(r, Math.max(ringFloor, r * 0.82, targetAt(t)));
         stem.px.push(x);
         stem.py.push(y);
         stem.pz.push(z);
@@ -649,7 +709,7 @@ export class GrowthContext {
               ddy = Math.sin(el);
             }
           }
-          c.len = Math.max(0.02, dist * c.reachRoll);
+          c.len = Math.max(0.02, dist * c.reachRoll * (cp?.lengthRatio ?? 1));
         }
         const rBeforeChild = stem.r[stem.r.length - 1];
         const rc = Math.min(
@@ -666,17 +726,9 @@ export class GrowthContext {
         kx -= sx * Math.tan(kink);
         ky -= sy * Math.tan(kink);
         kz -= sz * Math.tan(kink);
-        const rLinear = radiusAt(t);
-        const rPrevRing = stem.r.length >= 2 ? stem.r[stem.r.length - 2] : r0;
-        r = Math.min(
-          rBeforeChild,
-          Math.max(
-            MIN_RADIUS_RATIO * 0.6,
-            rPrevRing * 0.82,
-            rLinear * 0.82,
-            Math.sqrt(Math.max(0, r * r - 0.7 * rc * rc))
-          )
-        );
+        // Krzywa jest nadrzędna, reguła rur nie obniża pędu rodzica; ciągłość nasady
+        // dziecka zapewnia rcCapped (<= 0.88 r rodzica), więc to dziecko się zmniejsza, nie rodzic.
+        r = rBeforeChild;
         stem.r[stem.r.length - 1] = r;
         const rcCapped = Math.min(rc, r * 0.88);
         children.push({
@@ -730,6 +782,7 @@ export class GrowthContext {
         const forkLen =
           (1 - profile.trunkHeightRatio) *
           profile.crownSpreadRatio *
+          (cp.lengthRatio ?? 1) *
           (0.8 + tipPrng.next() * 0.3);
         const az0 = tipPrng.range(0, Math.PI * 2);
         const numForks = profile.trunkForkCount ?? 2;
@@ -1008,7 +1061,7 @@ export class GrowthContext {
 
   private levelRefLength(profile: SpeciesProfile, level: number): number {
     if (level === 0) return profile.trunkLengthRatio;
-    let len = profile.crownSpreadRatio;
+    let len = profile.crownSpreadRatio * (profile.levels[0]?.lengthRatio ?? 1);
     for (let l = 2; l <= level; l++) len *= profile.levels[l - 1].lengthRatio;
     return len;
   }

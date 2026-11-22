@@ -36,6 +36,8 @@ export interface TreeGenerationParams {
   lod?: TreeMeshLod;            // Degradacja geometryczna siatki z zachowaniem wyglądu (zastępuje `detail`); brak = dotychczasowe zachowanie
   doubleSidedTwigs?: boolean;   // Wstęgi gałązek L3+: false (domyślnie, schemat B dla DoubleSide) = 1 strona; true (schemat C dla FrontSide) = Front+Back
   wind?: { strength: number; dirX?: number; dirZ?: number; time?: number };
+  /** Diagnostyka: wywoływane raz na każdy wytłoczony pęd (poziom, boki w pierścieniu, liczba pierścieni, wstęga). Nie zmienia siatki. */
+  onStem?: (info: { level: number; sides: number; rings: number; ribbon: boolean }) => void;
   windAttributes?: boolean;     // Dołącz atrybut `windData` do siatki (wiatr w vertex shaderze, np. `applyTreeWind` z `usi-tree/three`); siatka bez zmian
 }
 
@@ -46,15 +48,26 @@ export interface TreeGenerationParams {
 export interface TreeMeshLod {
   /** Pędy rzędu ≥ 1 o promieniu nasady poniżej tego ułamka wysokości drzewa są pomijane */
   minStemRadiusRatio?: number;
+  /** Minimalna grubość (średnica) pędu w pikselach przy `minPixelsPerUnit`; pędy poniżej tego progu są pomijane */
+  minStemThicknessPx?: number;
   /** Odchyłka cięciwy przy decymacji pierścieni tuby (ułamek wysokości drzewa; oś i promień); brak = wszystkie pierścienie */
   ringTolerance?: number;
   /** Liczba boków pnia (3–8) */
   trunkSides?: number;
   /** Liczba boków gałęzi; 2 = pręt trójkątny: konar bez denka, cieńszy pęd zakończony szpicem (kora jest jednostronna, więc wstęga 2-boczna byłaby niewidoczna od tyłu) */
   branchSides?: number;
+  /**
+   * Liczba boków wg rzędu pędu (indeks = `stem.level`: 0 pień, 1..N skonfigurowane, N+1 automatyczne witki; ostatnia wartość
+   * powtarza się dla głębszych rzędów). 2 (lub mniej) = pojedyncza wstęga (2 trójkąty na pasmo, bez denka), ≥ 3 = tuba z szpicem.
+   * Ma pierwszeństwo przed `trunkSides`/`branchSides` (te zostają dla zgodności wstecznej).
+   */
+  levelSides?: number[];
   /** Skala ekranu (px na jednostkę), przy której i poniżej której poziom jest nieodróżnialny od `near` (brak = zawsze ważny) */
   minPixelsPerUnit?: number;
-  /** Ile najgłębszych rzędów pędów pominąć (jak `detail: 'LOW'` = 1) */
+  /**
+   * Ile najgłębszych rzędów pędów pominąć, licząc od automatycznych witek końcowych (poziom N+1, N = `profile.levels.length`):
+   * 1 = tylko witki (zachowuje najgłębszy poziom skonfigurowany), 2 = także poziom N itd. (ścieżka bez LOD, `detail: 'HIGH'` = 0)
+   */
   dropDeepestLevels?: number;
   /**
    * Obrys liścia o tym samym polu: sześciokąt (4 tr., obrys liścia poziomu bliskiego), pięciokąt (3 tr., ścięty koniec),
@@ -88,10 +101,10 @@ export interface TreeMeshLod {
    */
   maxBarkTriangles?: number;
   /**
-   * Zamiast liści bryła korony z miejsc liści: zamknięty rdzeń (pierścienie × boki) w trzech tonach wg kubełków `shade`
-   * oraz `lobes` dużych liści na nim (obrys `leafShape`, orientacja jak liście poziomu bliskiego), które łamią obrys
+   * Zamiast liści bryła korony z miejsc liści: zamknięta otoczka gwiaździsta obejmująca ~93% liści i gałęzi rzędów 1..N, bez dolnej części pod koroną; rozdzielone skupiska dają kilka brył (`maxBlobs`, domyślnie 3; 1 = jedna) (`rings` pasów szerokości × `sides` sektorów) w trzech tonach wg kubełków `shade`
+   * oraz opcjonalnie `lobes` dużych liści na niej (obrys `leafShape`, orientacja jak liście poziomu bliskiego), które łamią obrys
    */
-  crownShell?: { rings: number; sides: number; lobes?: number };
+  crownShell?: { rings: number; sides: number; lobes?: number; maxBlobs?: number };
 }
 
 /** Liczba trójkątów siatki drzewa: kora (materiał 0) i listowie (materiały 1..3) */
@@ -170,6 +183,10 @@ export interface BranchLevelParams {
   downAngleSlope?: number; // Dodatkowy kąt odchylenia u nasady rodzica, malejący do 0 na jego końcu (stopnie) — dolne konary rozłożyste
   kink?: number;        // Maks. załamanie pędu w węźle odgałęzienia, w stronę przeciwną do dziecka (stopnie, domyślnie 15)
   fork: number;         // Kąt rozwidlenia „Y” na końcu pędu (stopnie, 0 = brak) — kontynuacja jak w ez-tree
+  /** Geometryczny podział pędu: każdy kolejny odcinek = poprzedni × f (1 = równy podział, domyślnie; zakres [0.5, 1]). Długość pędu bez zmian. */
+  segmentDecay?: number;
+  /** Min. długość ostatniego odcinka względem długości pędu; przy `segmentDecay` < 1 zwiększa liczbę odcinków (maks. 40). Brak = n = `curveRes`. */
+  minSegmentRatio?: number;
   tipRatio?: number;    // Ułamek promienia pędu na końcu względem nasady (domyślnie: p.fork > 0 ? 0.5 : 0.22)
   /**
    * @deprecated Użyj `tipRatio` (+ `taperShape`). Wartość > 0 jest przeliczana na
@@ -189,6 +206,10 @@ export interface SpeciesProfile {
   trunkHeightRatio: number;      // Ułamek wysokości pnia bez gałęzi (odziomek do pierwszego konara)
   trunkBaseRadiusRatio: number;  // Promień pnia u podstawy / wysokość
   trunkLengthRatio: number;      // Długość przewodnika / wysokość (< 1: przewodnik ginie w koronie)
+  /** Geometryczny podział pnia (patrz `BranchLevelParams.segmentDecay`); brak = równy podział. */
+  trunkSegmentDecay?: number;
+  /** Min. ostatni odcinek pnia względem jego długości (patrz `BranchLevelParams.minSegmentRatio`). */
+  trunkMinSegmentRatio?: number;
   trunkTipRatio?: number;        // Ułamek promienia pnia na szczycie względem podstawy (domyślnie 0.3; < 0.15: przewodnik silnie zbieżny i zanika)
   /**
    * @deprecated Użyj `trunkTipRatio` + `taperShape`. Wartość x > 0 jest przeliczana na
@@ -200,6 +221,8 @@ export interface SpeciesProfile {
   trunkCurveV: number;           // Falowanie przewodnika (stopnie na segment)
   crownSpreadRatio: number;      // Skala długości konarów względem wysokości
   crownShape: CrownShape;
+  crownShapeB?: CrownShape;
+  crownShapeBlend?: number;
   twigStroke?: number;           // Mnożnik grubości kreski gałązek i witek (rząd ≥ 2) w stylu ilustracji; brak = 1
   crownPeak?: number;            // Względna wysokość w koronie (0 = nasada, 1 = wierzchołek), na której obwiednia jest najszersza; brak = naturalne maksimum kształtu
   ratioPower: number;            // Wykładnik reguły rur: r_dziecka = r_rodzica · (L_dziecka / L_rodzica)^ratioPower

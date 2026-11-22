@@ -28,11 +28,15 @@ export const TREE_LOD_MIN_PIXELS_PER_UNIT_MAX: Readonly<Record<TreeLodName, numb
 
 /**
  * Zestawy poziomów, od najbliższego:
- * - `near`: wszystkie miejsca liści profilu szkieletu, liście sześciokątne; pień, konary i gałęzie bez najgłębszego rzędu,
+ * `dropDeepestLevels` liczy od automatycznych witek końcowych (poziom N+1, N = liczba poziomów profilu):
+ * 1 = tylko witki, 2 = także najgłębszy poziom skonfigurowany (LN) itd.
+ * - `near`: wszystkie miejsca liści profilu szkieletu, liście sześciokątne (4 tr.); pień i konary (L0..LN) bez automatycznych witek; `levelSides` [3,3,2]: pień i L1 3 boki, L2 i głębsze wstęgi 2-boczne (2 tr. na pasmo; `branchSides: 2` w starszym trybie to nadal 3-boczny pręt),
  * - `mid`: pełny rysunek konarów (otwarte pręty trójkątne), gałęzie od najdłuższych zbiegające się w szpic; mniej liści,
- *   większych, o tym samym sześciokątnym obrysie,
- * - `far`: pień i główne konary; jeszcze mniej, większych liści o obrysie latawca (2 trójkąty, pole sześciokąta),
- * - `shell`: pień z kilkoma konarami, zamknięty rdzeń korony i kilkanaście dużych liści na nim (maska konturu i cień korony).
+ *   większych, o tym samym obrysie latawca,
+ * - `far`: pień i główne konary; jeszcze mniej, większych liści trójkątnych (1 trójkąt),
+ * - `shell`: pień z kilkoma konarami, zamknięty rdzeń korony i kilkanaście dużych liści na nim (maska konturu i cień korony; liście trójkątne).
+ * Drabina trójkątów (bazowe gatunki, 12 m): mid ≈ 30–35% near (`leafKeep` 0.65, `maxLeaves` 5000), far ≈ 20–35% mid
+ * (`leafKeep` 0.46, `maxLeaves` 2400), shell ≈ 130–200 tr.
  * `mid`/`far` mają twardy budżet liści (`maxLeaves`) i względny ułamek miejsc (`leafKeep`); liść rośnie do
  * `MAX_LEAF_SIZE_SCALE_BUDGET`, a pokrycie korony spada, gdy budżet na nie nie starcza.
  * Liść poziomu dalszego to powiększony liść poziomu bliskiego — ten sam obrys i rozkład orientacji, więc to samo
@@ -44,44 +48,40 @@ export const TREE_LOD_PRESETS: Readonly<Record<TreeLodName, Readonly<TreeMeshLod
   near: {
     dropDeepestLevels: 1,
     ringTolerance: 0.002,
-    trunkSides: 4,
-    branchSides: 3,
+    levelSides: [3, 3, 2],
     leafShape: 'hex',
   },
   mid: {
-    dropDeepestLevels: 1,
+    dropDeepestLevels: 2,
     minPixelsPerUnit: TREE_LOD_MIN_PIXELS_PER_UNIT_MAX.mid,
-    minStemRadiusRatio: 0.0015,
-    ringTolerance: 0.008,
-    trunkSides: 4,
-    branchSides: 2,
-    maxBarkTriangles: 450,
-    leafShape: 'hex',
-    leafKeep: 0.45,
-    maxLeaves: 1000,
+    ringTolerance: 0.002,
+    levelSides: [3, 3, 2],
+    maxBarkTriangles: 2500,
+    leafShape: 'quad',
+    leafKeep: 0.65,
+    maxLeaves: 5000,
   },
   far: {
-    dropDeepestLevels: 1,
+    dropDeepestLevels: 3,
     minPixelsPerUnit: TREE_LOD_MIN_PIXELS_PER_UNIT_MAX.far,
-    minStemRadiusRatio: 0.003,
-    ringTolerance: 0.025,
-    trunkSides: 3,
-    branchSides: 2,
-    maxBarkTriangles: 120,
-    leafShape: 'quad',
-    leafKeep: 0.25,
-    maxLeaves: 500,
+    ringTolerance: 0.006,
+    levelSides: [3, 2],
+    maxBarkTriangles: 700,
+    leafShape: 'tri',
+    leafKeep: 0.46,
+    maxLeaves: 2400,
     leafCoverage: 0.7,
   },
   shell: {
-    dropDeepestLevels: 1,
+    dropDeepestLevels: 3,
     minPixelsPerUnit: TREE_LOD_MIN_PIXELS_PER_UNIT_MAX.shell,
-    ringTolerance: 0.04,
-    trunkSides: 3,
-    branchSides: 2,
-    maxBarkTriangles: 50,
-    leafShape: 'penta',
-    crownShell: { rings: 2, sides: 5, lobes: 17 },
+    ringTolerance: 0.012,
+    // Tylko pień (otoczka zakrywa gałęzie)
+    maxBranches: 0,
+    levelSides: [3],
+    maxBarkTriangles: 250,
+    leafShape: 'tri',
+    crownShell: { rings: 7, sides: 10, lobes: 0 },
   },
 };
 
