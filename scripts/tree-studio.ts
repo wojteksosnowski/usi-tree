@@ -26,25 +26,25 @@ import {
   SPECIES_PROFILES,
   ILLUSTRATION_STROKE,
   toThreeBufferGeometry,
-} from '${path.resolve('src/three/index').replace(/\\\\/g, '/')}';
+} from '${path.resolve('src/three/index').replace(/\\/g, '/')}';
 import {
   FITTED_PROFILES,
-} from '${path.resolve('src/profiles/index').replace(/\\\\/g, '/')}';
+} from '${path.resolve('src/profiles/index').replace(/\\/g, '/')}';
 import {
   treeKindParams,
   describeTreeKindModelSource,
   type TreeKind,
-} from '${path.resolve('src/core/treeSpeciesRegistry').replace(/\\\\/g, '/')}';
+} from '${path.resolve('src/core/treeSpeciesRegistry').replace(/\\/g, '/')}';
 import {
   evalParameterCurve,
   fitParameterCurve,
   profileAtHeight,
   resolveNumericParam,
   scaleProfileByHeight,
-} from '${path.resolve('src/core/heightProfile').replace(/\\\\/g, '/')}';
-import { CrownEnvelope, crownRatio } from '${path.resolve('src/core/crownEnvelope').replace(/\\\\/g, '/')}';
-import { countMeshTriangles, TREE_LOD_PRESETS } from '${path.resolve('src/core/treeLod').replace(/\\\\/g, '/')}';
-import type { SpeciesProfile, TrunkForm, TreeDetail, TreeMeshLod, CrownShape } from '${path.resolve('src/core/types').replace(/\\\\/g, '/')}';
+} from '${path.resolve('src/core/heightProfile').replace(/\\/g, '/')}';
+import { CrownEnvelope, crownRatio } from '${path.resolve('src/core/crownEnvelope').replace(/\\/g, '/')}';
+import { countMeshTriangles, TREE_LOD_PRESETS } from '${path.resolve('src/core/treeLod').replace(/\\/g, '/')}';
+import type { SpeciesProfile, TrunkForm, TreeDetail, TreeMeshLod, CrownShape } from '${path.resolve('src/core/types').replace(/\\/g, '/')}';
 
 const ANCHOR_HEIGHTS = [6, 9, 15, 24] as const;
 const CROWN_SHAPES: CrownShape[] = [

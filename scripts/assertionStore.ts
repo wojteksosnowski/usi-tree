@@ -1,17 +1,25 @@
 /**
  * Zapis/odczyt modeli asercyjnych w `assertion-models/<kind>.json` (katalog w repo, nie tmp).
  *
- * Format pliku: pola podsumowania (hash, counts, bbox, params, paramsHash...) + `verticesF32Base64`
- * (płaskie xyz jako Float32 little-endian w base64; ~5.3 znaku/liczbę zamiast ~10 przy JSON).
+ * Format pliku: pola podsumowania (hash, counts, bbox, params, paramsHash...) + `verticesQ`
+ * (płaskie xyz skwantyzowane do siatki `quant.step` = 0,0005 m, delta po osiach wg kolejności wierzchołków,
+ * zigzag + varint LEB128, deflate-raw poziom 9, base64) oraz `quant: { step, maxError }`
+ * (maxError = faktyczny max |zdekodowane - oryginał| w metrach).
+ * Payload jest skwantyzowany (stratny, wizualnie bezstratny); `hash` dotyczy NIESKWANTYZOWANEJ siatki
+ * z generatora (float32), więc nie da się go odtworzyć z samego payloadu.
+ * Starsze pliki z `verticesF32Base64` (Float32 LE base64) są nadal odczytywane.
  * API (`readAssertionModel`) odkodowuje to do `vertices: number[]`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import {
   ASSERTION_HEIGHT,
   buildAssertionModel,
+  QUANT_STEP_M,
   decodeFloat32Base64,
-  encodeFloat32Base64,
+  decodeQuantizedVertices,
+  encodeQuantizedVertices,
   hashParams,
   summarizeAssertionModel,
   type AssertionModel,
@@ -63,11 +71,14 @@ export function writeAssertionModel(kind: string, fitted = loadFitted()): Assert
     params: resolveParamsFresh(kind, fitted),
   });
   const { vertices, ...rest } = model;
+  const step = QUANT_STEP_M;
+  const enc = encodeQuantizedVertices(vertices, step);
+  const dec = decodeQuantizedVertices(enc, step, vertices.length);
+  let maxError = 0;
+  for (let i = 0; i < vertices.length; i++) maxError = Math.max(maxError, Math.abs(dec[i] - vertices[i]));
+  const verticesQ = zlib.deflateRawSync(Buffer.from(enc), { level: 9 }).toString('base64');
   fs.mkdirSync(ASSERTION_DIR, { recursive: true });
-  fs.writeFileSync(
-    fileFor(kind),
-    JSON.stringify({ ...rest, verticesF32Base64: encodeFloat32Base64(vertices) }) + '\n',
-  );
+  fs.writeFileSync(fileFor(kind), JSON.stringify({ ...rest, quant: { step, maxError }, verticesQ }) + '\n');
   const summary = summarizeAssertionModel(model);
   writeSummaries();
   return summary;
@@ -78,7 +89,7 @@ export function writeSummaries(): void {
   fs.writeFileSync(path.join(ASSERTION_DIR, SUMMARIES_FILE), JSON.stringify(listAssertionSummaries()) + '\n');
 }
 
-function readFile(kind: string): (AssertionModelSummary & { verticesF32Base64: string }) | null {
+function readFile(kind: string): (AssertionModelSummary & { verticesF32Base64?: string; verticesQ?: string; quant?: { step: number; maxError: number } }) | null {
   const f = fileFor(kind);
   if (!fs.existsSync(f)) return null;
   try {
@@ -97,8 +108,12 @@ export function readAssertionModel(kind: string): AssertionModel {
     writeAssertionModel(kind, fitted);
     file = readFile(kind)!;
   }
-  const { verticesF32Base64, ...rest } = file;
-  return { ...rest, vertices: decodeFloat32Base64(verticesF32Base64) };
+  const { verticesF32Base64, verticesQ, quant, ...rest } = file;
+  if (verticesQ && quant) {
+    const bytes = new Uint8Array(zlib.inflateRawSync(Buffer.from(verticesQ, 'base64')));
+    return { ...rest, vertices: decodeQuantizedVertices(bytes, quant.step, 3 * rest.counts.vertices) };
+  }
+  return { ...rest, vertices: decodeFloat32Base64(verticesF32Base64!) };
 }
 
 export function listAssertionSummaries(): AssertionModelSummary[] {
@@ -107,7 +122,7 @@ export function listAssertionSummaries(): AssertionModelSummary[] {
   for (const name of fs.readdirSync(ASSERTION_DIR).sort()) {
     if (!name.endsWith('.json') || name === SUMMARIES_FILE) continue;
     try {
-      const { verticesF32Base64: _v, ...rest } = JSON.parse(fs.readFileSync(path.join(ASSERTION_DIR, name), 'utf-8'));
+      const { verticesF32Base64: _v, verticesQ: _q, quant: _qt, ...rest } = JSON.parse(fs.readFileSync(path.join(ASSERTION_DIR, name), 'utf-8'));
       out.push(rest);
     } catch {
       /* pomiń uszkodzony */

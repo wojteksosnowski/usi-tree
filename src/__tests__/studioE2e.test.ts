@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 // @ts-ignore - node types not in tsconfig
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -8,7 +9,7 @@ import path from 'node:path';
 import { TreeGenerator } from '../core/TreeGenerator';
 import type { SpeciesProfile, CrownShape } from '../core/types';
 
-const CURRENT_DIR = path.dirname(new URL(import.meta.url).pathname);
+const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const FITTED_PATH = path.resolve(CURRENT_DIR, '../core/fittedProfiles.json');
 
 interface FittedEntry {
@@ -246,7 +247,7 @@ describe('Tree Studio E2E', () => {
     let serverProc: ChildProcess | null = null;
 
     try {
-      serverProc = spawn('./node_modules/.bin/tsx', ['scripts/tree-studio.ts'], {
+      serverProc = spawn('node', ['node_modules/tsx/dist/cli.mjs', 'scripts/tree-studio.ts'], {
         cwd: path.resolve(CURRENT_DIR, '../..'),
         env: { ...(globalThis as any).process.env, PORT: String(port) },
         stdio: ['ignore', 'pipe', 'pipe'],

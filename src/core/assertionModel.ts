@@ -128,3 +128,50 @@ export function decodeFloat32Base64(b64: string): number[] {
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   return Array.from(new Float32Array(u8.buffer));
 }
+
+/** Krok siatki kwantyzacji współrzędnych (m): 0,05 cm */
+export const QUANT_STEP_M = 0.0005;
+
+/**
+ * Kwantyzacja do siatki `step`, delta po osiach (x,y,z względem poprzedniego wierzchołka),
+ * zigzag i varint LEB128. Długość `values` musi być wielokrotnością 3.
+ */
+export function encodeQuantizedVertices(values: ArrayLike<number>, step: number = QUANT_STEP_M): Uint8Array {
+  const out: number[] = [];
+  const prev = [0, 0, 0];
+  for (let i = 0; i < values.length; i++) {
+    const a = i % 3;
+    const q = Math.round(values[i] / step);
+    const d = q - prev[a];
+    prev[a] = q;
+    let z = d >= 0 ? d * 2 : -d * 2 - 1; // zigzag (bez operatorów bitowych: bezpieczne > 2^31)
+    while (z >= 128) {
+      out.push((z % 128) | 128);
+      z = Math.floor(z / 128);
+    }
+    out.push(z);
+  }
+  return Uint8Array.from(out);
+}
+
+export function decodeQuantizedVertices(bytes: Uint8Array, step: number, count: number): number[] {
+  const out: number[] = new Array(count);
+  const prev = [0, 0, 0];
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    let z = 0;
+    let mul = 1;
+    for (;;) {
+      if (p >= bytes.length) throw new Error('Uciety strumien varint');
+      const b = bytes[p++];
+      z += (b & 127) * mul;
+      if (b < 128) break;
+      mul *= 128;
+    }
+    const d = z % 2 === 0 ? z / 2 : -(z + 1) / 2;
+    const a = i % 3;
+    prev[a] += d;
+    out[i] = prev[a] * step;
+  }
+  return out;
+}
