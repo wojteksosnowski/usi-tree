@@ -25,6 +25,8 @@ export const ASSERTION_DIR = path.resolve('assertion-models');
 const FITTED_PATH = path.resolve('src/core/fittedProfiles.json');
 const PKG_VERSION: string = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf-8')).version;
 
+export const SUMMARIES_FILE = 'summaries.json';
+
 export function fileFor(kind: string): string {
   return path.join(ASSERTION_DIR, `${kind.replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
 }
@@ -66,7 +68,14 @@ export function writeAssertionModel(kind: string, fitted = loadFitted()): Assert
     fileFor(kind),
     JSON.stringify({ ...rest, verticesF32Base64: encodeFloat32Base64(vertices) }) + '\n',
   );
-  return summarizeAssertionModel(model);
+  const summary = summarizeAssertionModel(model);
+  writeSummaries();
+  return summary;
+}
+
+/** Mały indeks podsumowań (bez wierzchołków) wysyłany w paczce npm */
+export function writeSummaries(): void {
+  fs.writeFileSync(path.join(ASSERTION_DIR, SUMMARIES_FILE), JSON.stringify(listAssertionSummaries()) + '\n');
 }
 
 function readFile(kind: string): (AssertionModelSummary & { verticesF32Base64: string }) | null {
@@ -96,7 +105,7 @@ export function listAssertionSummaries(): AssertionModelSummary[] {
   if (!fs.existsSync(ASSERTION_DIR)) return [];
   const out: AssertionModelSummary[] = [];
   for (const name of fs.readdirSync(ASSERTION_DIR).sort()) {
-    if (!name.endsWith('.json')) continue;
+    if (!name.endsWith('.json') || name === SUMMARIES_FILE) continue;
     try {
       const { verticesF32Base64: _v, ...rest } = JSON.parse(fs.readFileSync(path.join(ASSERTION_DIR, name), 'utf-8'));
       out.push(rest);
