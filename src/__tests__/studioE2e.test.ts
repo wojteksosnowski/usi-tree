@@ -243,6 +243,9 @@ describe('Tree Studio E2E', () => {
     const horseFile = path.join(ASSERT_DIR, 'Horsechestnut.json');
     const synthFile = path.join(ASSERT_DIR, '__E2E_TEST_KIND__.json');
     const horseBackup = fs.existsSync(horseFile) ? fs.readFileSync(horseFile, 'utf8') : null;
+    // save-profile przepisuje też summaries.json — bez kopii test zostawia w nim wpisy testowe
+    const summariesFile = path.join(ASSERT_DIR, 'summaries.json');
+    const summariesBackup = fs.existsSync(summariesFile) ? fs.readFileSync(summariesFile, 'utf8') : null;
     const port = 4199;
     let serverProc: ChildProcess | null = null;
 
@@ -379,6 +382,8 @@ describe('Tree Studio E2E', () => {
       if (horseBackup !== null) fs.writeFileSync(horseFile, horseBackup, 'utf8');
       else (fs as any).rmSync(horseFile, { force: true });
       (fs as any).rmSync(synthFile, { force: true });
+      if (summariesBackup !== null) fs.writeFileSync(summariesFile, summariesBackup, 'utf8');
+      else (fs as any).rmSync(summariesFile, { force: true });
       if (serverProc && !serverProc.killed) {
         serverProc.kill('SIGTERM');
       }
