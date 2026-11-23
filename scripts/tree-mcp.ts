@@ -7,6 +7,7 @@
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { TreeGenerator } from '../src/core/TreeGenerator.js';
 import { treeKindParams, type TreeKind } from '../src/core/treeSpeciesRegistry.js';
@@ -71,6 +72,18 @@ const TOOLS = [
       required: ['kind', 'anchorHeight', 'key', 'value'],
     },
   },
+  {
+    name: 'analyze_chrome_trace',
+    description: 'Analyzes a Chrome DevTools Performance trace (.json or .json.gz) and summarizes frame times, FPS, and main-thread / GPU hotspots.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tracePath: { type: 'string', description: 'Path to .json or .json.gz trace file' },
+        topN: { type: 'number', description: 'Number of top hotspots to return (default 15)' },
+      },
+      required: ['tracePath'],
+    },
+  },
 ];
 
 function handleToolCall(name: string, args: any) {
@@ -129,6 +142,111 @@ function handleToolCall(name: string, args: any) {
     anchor.profile[args.key] = args.value;
     fs.writeFileSync(FITTED_PATH, JSON.stringify(fitted, null, 2) + '\n');
     return { ok: true, kind: args.kind, anchorHeight: args.anchorHeight, key: args.key, value: args.value };
+  }
+  if (name === 'analyze_chrome_trace') {
+    if (typeof args.tracePath !== 'string' || !args.tracePath) throw new Error('tracePath is required (string)');
+    const tracePath = path.resolve(args.tracePath);
+    if (!fs.existsSync(tracePath) || !fs.statSync(tracePath).isFile()) throw new Error(`Trace file not found: ${tracePath}`);
+    const rawBuf = fs.readFileSync(tracePath);
+    const isGz = tracePath.endsWith('.gz') || (rawBuf[0] === 0x1f && rawBuf[1] === 0x8b);
+    const trace = JSON.parse((isGz ? zlib.gunzipSync(rawBuf) : rawBuf).toString('utf-8'));
+    const events: any[] = Array.isArray(trace) ? trace : (trace.traceEvents ?? []);
+    const topNRaw = args.topN ?? 15;
+    if (typeof topNRaw !== 'number' || !Number.isFinite(topNRaw) || topNRaw < 1) throw new Error('topN must be a positive number');
+    const topN = Math.min(Math.floor(topNRaw), 1000);
+
+    // Frame timing: DrawFrame only (fallback BeginMainThreadFrame), single dominant pid, sorted by ts.
+    const pickFrames = (n: string) => events.filter((e) => e.name === n && typeof e.ts === 'number');
+    let frameEvs = pickFrames('DrawFrame');
+    if (frameEvs.length === 0) frameEvs = pickFrames('BeginMainThreadFrame');
+    const pidCounts = new Map<any, number>();
+    for (const e of frameEvs) pidCounts.set(e.pid, (pidCounts.get(e.pid) ?? 0) + 1);
+    let bestPid: any = undefined;
+    let bestCount = 0;
+    for (const [pid, c] of pidCounts) if (c > bestCount) { bestCount = c; bestPid = pid; }
+    const frameTs = frameEvs.filter((e) => e.pid === bestPid).map((e) => e.ts as number).sort((a, b) => a - b);
+    const frames: number[] = [];
+    for (let i = 1; i < frameTs.length; i++) {
+      const d = (frameTs[i] - frameTs[i - 1]) / 1000;
+      if (d > 0) frames.push(d);
+    }
+    let sumMs = 0;
+    let maxFrameMs = 0;
+    for (const f of frames) { sumMs += f; if (f > maxFrameMs) maxFrameMs = f; }
+    const avgFrameMs = frames.length ? sumMs / frames.length : 0;
+    const sortedFrames = [...frames].sort((a, b) => a - b);
+    const pct = (p: number) => (sortedFrames.length ? sortedFrames[Math.min(sortedFrames.length - 1, Math.floor(p * sortedFrames.length))] : 0);
+
+    // Self time: per (pid, tid), complete (X) events plus B/E pairs converted to spans.
+    type Span = { ts: number; dur: number; label: string };
+    const threads = new Map<string, Span[]>();
+    const openB = new Map<string, Span[]>();
+    const labelOf = (ev: any) => (ev.args?.data?.functionName ? `${ev.name}:${ev.args.data.functionName}` : ev.name);
+    const sortedEvs = events.filter((e) => typeof e.ts === 'number').sort((a, b) => a.ts - b.ts);
+    for (const ev of sortedEvs) {
+      const key = `${ev.pid}:${ev.tid}`;
+      if (ev.ph === 'X' && typeof ev.dur === 'number' && ev.dur > 0) {
+        if (!threads.has(key)) threads.set(key, []);
+        threads.get(key)!.push({ ts: ev.ts, dur: ev.dur, label: labelOf(ev) });
+      } else if (ev.ph === 'B') {
+        if (!openB.has(key)) openB.set(key, []);
+        openB.get(key)!.push({ ts: ev.ts, dur: 0, label: labelOf(ev) });
+      } else if (ev.ph === 'E') {
+        const sp = openB.get(key)?.pop();
+        if (sp && ev.ts > sp.ts) {
+          sp.dur = ev.ts - sp.ts;
+          if (!threads.has(key)) threads.set(key, []);
+          threads.get(key)!.push(sp);
+        }
+      }
+    }
+    const stats = new Map<string, { count: number; selfMs: number; totalMs: number; maxMs: number }>();
+    const add = (label: string, selfUs: number, totalUs: number) => {
+      const cur = stats.get(label) ?? { count: 0, selfMs: 0, totalMs: 0, maxMs: 0 };
+      cur.count++;
+      cur.selfMs += selfUs / 1000;
+      cur.totalMs += totalUs / 1000;
+      if (totalUs / 1000 > cur.maxMs) cur.maxMs = totalUs / 1000;
+      stats.set(label, cur);
+    };
+    for (const spans of threads.values()) {
+      spans.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+      const stack: { end: number; label: string; dur: number; childUs: number }[] = [];
+      const pop = () => {
+        const t = stack.pop()!;
+        add(t.label, Math.max(0, t.dur - t.childUs), t.dur);
+      };
+      for (const s of spans) {
+        while (stack.length && stack[stack.length - 1].end <= s.ts) pop();
+        const parent = stack[stack.length - 1];
+        if (parent) parent.childUs += Math.min(s.dur, parent.end - s.ts);
+        stack.push({ end: s.ts + s.dur, label: s.label, dur: s.dur, childUs: 0 });
+      }
+      while (stack.length) pop();
+    }
+    const hotspots = [...stats.entries()]
+      .sort((a, b) => b[1].selfMs - a[1].selfMs)
+      .slice(0, topN)
+      .map(([event, s]) => ({
+        event,
+        count: s.count,
+        selfMs: Number(s.selfMs.toFixed(2)),
+        totalMs: Number(s.totalMs.toFixed(2)),
+        maxMs: Number(s.maxMs.toFixed(2)),
+      }));
+
+    return {
+      totalEvents: events.length,
+      frameSource: frameEvs.length && frameEvs[0].name,
+      framePid: bestPid ?? null,
+      frameCount: frames.length,
+      avgFrameMs: Number(avgFrameMs.toFixed(2)),
+      p50FrameMs: Number(pct(0.5).toFixed(2)),
+      p95FrameMs: Number(pct(0.95).toFixed(2)),
+      maxFrameMs: Number(maxFrameMs.toFixed(2)),
+      approxFps: avgFrameMs > 0 ? Number((1000 / avgFrameMs).toFixed(1)) : 0,
+      hotspots,
+    };
   }
   throw new Error(`Unknown tool: ${name}`);
 }

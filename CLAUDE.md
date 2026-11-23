@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. For implementation use the `worker` agent (`.claude/agents/worker.md`, Sonnet). Use Haiku (`model: haiku`) for I/O, code search and git.
 3. A `worker` may spawn its own sub-agents only for large, self-contained parts of its task — never for small tasks.
 
-Wiążące reguły architektury, testów i bezpieczników są w @AGENTS.md. Ten plik ich nie powtarza.
+Zasady i metody pracy są w @AGENTS.md; szczegóły techniczne (moduły, parametry, ciągłość, wiatr, liście, testy, fitter, Studio/MCP) w `docs/` (indeks na końcu AGENTS.md). Ten plik ich nie powtarza.
 
 ## Polecenia
 

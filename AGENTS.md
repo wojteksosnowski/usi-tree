@@ -1,44 +1,44 @@
-# Wytyczne Architektoniczne i Rozwoju `usi-tree`
+# Wytyczne `usi-tree`
 
-## 1. Architektura Generatora i Separacja Odpowiedzialności
-- **Bezstanowa Fasada (`TreeGenerator.ts`)**: Klasa `TreeGenerator` pełni wyłącznie rolę fasady publicznej (wsteczna kompatybilność API). NIE wolno dodawać do niej mutowalnego stanu statycznego (`static shared*`, `static tmp`, `static envelope*`).
-- **Re-entrancy i Bezpieczeństwo Współbieżne (`GrowthContext`)**: Wszelkie operacje wzrostu botanicznego muszą korzystać z instancyjnego kontekstu `GrowthContext` z [src/core/growthEngine.ts](file:///Volumes/Samsam/py/usi-tree/src/core/growthEngine.ts). Zapewnia to 100% thread-safety (np. w Web Workers).
-- **Czystość Modułów**:
-  - Typy domenowe: wyłącznie w [src/core/types.ts](file:///Volumes/Samsam/py/usi-tree/src/core/types.ts) (eliminuje cykle importów).
-  - Profile morfologiczne: [src/core/speciesProfiles.ts](file:///Volumes/Samsam/py/usi-tree/src/core/speciesProfiles.ts).
-  - Geometria obwiedni: [src/core/crownEnvelope.ts](file:///Volumes/Samsam/py/usi-tree/src/core/crownEnvelope.ts).
-  - Wytłaczanie siatki i liście: [src/core/meshExtruder.ts](file:///Volumes/Samsam/py/usi-tree/src/core/meshExtruder.ts).
-  - Bufory pamięci: [src/core/meshBuilder.ts](file:///Volumes/Samsam/py/usi-tree/src/core/meshBuilder.ts).
+Konkrety (nazwy funkcji, parametry, progi, ścieżki) są w `docs/`. Tu tylko zasady i metody pracy.
 
-## 2. Standardy Testowania (Vitest)
-- **Timeouty dla testów geometrii**: Złożone testy generujące siatki wielu drzew lub liście (foliage accents) muszą definiować jawny timeout (np. `it('...', () => { ... }, 30000)`), aby zapobiec fałszywym błędom po 5 sekundach.
-- **Niezależność od żywych profili**: Testy silnika (inwarianty LOD, sumy kontrolne siatek, ciągłość) NIE mogą zależeć od [src/core/fittedProfiles.json](file:///Volumes/Samsam/py/usi-tree/src/core/fittedProfiles.json) (stale strojony); używają bazowych profili gatunkowych lub zamrożonych fixture w `src/__tests__/fixtures/`. Testy przechodzące po żywych profilach sprawdzają wyłącznie własności odporne (niepusta siatka, brak NaN, monotoniczność liczby trójkątów).
-- **Weryfikacja Re-entrancy**: Każda zmiana w silniku generacji musi zachowywać zdawalność testów w [src/__tests__/reentrancy.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/reentrancy.test.ts).
-- **Prawdziwe testy E2E bez mocków**: Weryfikacja wpływu parametrów na geometrię 3D (`TreeGenerator.generateRaw`) oraz zapisu (`POST /api/save-profile`) w [src/__tests__/studioE2e.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/studioE2e.test.ts) musi działać na rzeczywistym silniku i serwerze HTTP (z kopią zapasową `fittedProfiles.json` w `try...finally`), bez żadnych mocków.
-- **Matematyczna ciągłość szkieletu (brak uskoków)**: Każda zmiana w [src/core/growthEngine.ts](file:///Volumes/Samsam/py/usi-tree/src/core/growthEngine.ts) musi przechodzić testy w [src/__tests__/branchContinuity.test.ts](file:///Volumes/Samsam/py/usi-tree/src/__tests__/branchContinuity.test.ts):
-  - Monotoniczne zwężanie wzdłuż każdego pędu (`s.r[i+1] <= s.r[i]`) oraz brak nagłych schodków między pierścieniami (`s.r[i+1] / s.r[i] >= 0.78`).
-  - Promień nasady gałęzi potomnej zawsze mniejszy od promienia rodzica w punkcie odgałęzienia (`s.r[0] <= 0.9 * r_parent_at_attach`; redukcja po `prune` nie może podbijać `r0` przez `Math.max(MIN_RADIUS_RATIO, ...)` ponad wyjściowe `r0`).
-  - Płynne przejście na rozwidleniu `FORKED` (`rTopFork = rMain`, min. 6 segmentów dolnego pnia z gładkim zanikiem `flareFactor`).
+## Architektura
+- Fasada generatora jest bezstanowa; stan wzrostu żyje w kontekście per wywołanie, więc generacja jest re-entrantna.
+- Typy domenowe w jednym miejscu; moduły mają wąskie, rozłączne odpowiedzialności.
+- Rdzeń pakietu nie ma zależności uruchomieniowych; zmiany API i domyślnego wyglądu są wstecznie zgodne.
 
-## 3. Integralność Pakietu i Eksportów
-- Pakiet główny (`usi-tree`) oraz adaptery (`usi-tree/three`, `usi-tree/fitter`, `usi-tree/schema`, `usi-tree/profiles`) muszą zachowywać zero runtime dependencies w rdzeniu (`three` jest peerDependency opcjonalnym).
+## Szkielet
+- Szkielet jest ciągły matematycznie: zwężanie monotoniczne, bez uskoków, dziecko cieńsze od rodzica.
 
-## 4. Narzędzia Odwrotnego Modelowania (TreeFit / Fitter) i Środowisko Robocze
-- **Lokalizacja Skryptów CLI**: Wszystkie narzędzia ekstrakcji, translacji Sapling oraz strojenia grafu gałęzi znajdują się w `.agents/skills/procedural-tree-fitter/scripts/` i są uruchamiane przez `NODE_NO_WARNINGS=1 npx tsx`.
-- **Baza Profili Gatunkowych**: Docelowym rejestrem wystrojonych profili jest `src/core/fittedProfiles.json`.
-- **Izolacja Artefaktów Roboczych**: Tymczasowe rendery, grafy JSON i plansze porównawcze muszą być zapisywane wyłącznie w katalogu `tmp/` (np. `tmp/tree-renders/`), zignorowanym w `.gitignore`.
-- **Twarde Bezpieczniki 3D (Sanity Checks)**:
-  - Wskaźnik smukłości $W/H$: korona nie może przekraczać limitu gatunku (kolumnowe: $W/H \le 0.45$, rozłożyste: $W/H \le 0.85$, zakaz $W/H > 1.0$).
-  - Strojenie inkrementalne: maksymalna delta parametru w jednym kroku $\le \pm 25\%$.
-  - Ochrona budżetu pędów: liczba pędów kandydata nie może spaść o więcej niż 20% względem gatunku bazowego.
+## Testy
+- Testy silnika nie zależą od żywo strojonych danych; używają profili bazowych lub zamrożonych fixture.
+- Testy geometrii mają jawne timeouty; E2E działają na prawdziwym silniku i serwerze, bez mocków.
+- Zmiana geometrii domyślnych drzew wymaga świadomej aktualizacji sum kontrolnych.
 
-## 5. Ontogeneza, Liście, Wiatr i Tree Studio (`scripts/tree-studio.ts`)
-- **Ciągłe dopasowanie krzywych wysokości (`heightProfile.ts`)**: Parametry zmienne między węzłami `heightAnchors` są dopasowywane przez `fitParameterCurve` (2 węzły: liniowo; ≥ 3 węzły: wybór najlepszego modelu z `{liniowa, logarytmiczna, wykładnicza}` wg SSE) z płynną ekstrapolacją powyżej ostatniego węzła (> 24 m). Krzywa obowiązuje także w samych węzłach (bez skoku do surowego węzła); poniżej najniższego liniowa kontynuacja stycznej krzywej w h0; powyżej ostatniego węzła kontynuacja logarytmiczna z nachyleniem krzywej w hN. Domyślne wartości i zakresy `[min, max]` (przycięcie krzywej, liczby całkowite) wyłącznie w [src/core/paramSpec.ts](file:///Volumes/Samsam/py/usi-tree/src/core/paramSpec.ts).
-- **Geometria liści i szypułki (`meshExtruder.ts`)**:
-  - Obrysy liści (`tri` 1 trójkąt, `quad` 2 trójkąty, `penta` 3 trójkąty, `hex` 4 trójkąty oraz `leafOutline`) są symetryczne osiowo (`across = 0`) i przypięte wierzchołkiem `(0, 0)` do końca szypułki (`petioleLengthRatio` odsuwa nasadę blaszki od pędu i nie generuje trójkątów).
-  - Rozmiar liścia może być zadany absolutnie w centymetrach (`leafSizeCm`), co ma priorytet nad `leafSizeRatio`.
-  - Każde miejsce liścia (`site i`) w `addLeaves` musi korzystać z deterministycznego generatora ziarna indeksowanego numerem miejsca (`sitePrng`), aby ruch gałązek nie przesuwał strumienia losowań pozostałych liści.
-- **Kinematyka wiatru**: Zabrania się deformowania wierzchołków siatki globalną falą `sin(x+y)` w przestrzeni ekranu. Wiatr ugina hierarchicznie szkielet (`TreeGenerator.applyWindToSkeleton` z zachowaniem długości segmentów i dziedziczeniem przesunięcia dla `stems[p].level <= stems[i].level`) oraz odchyla sztywne liście wokół szypułki wg `petioleLengthRatio` i `petiolePliancy`.
-- **Tree Studio i MCP**:
-  - Podczas przeciągania wierzchołków liścia (`onmousemove`) aktualizować wyłącznie podgląd SVG, a przebudowę drzewa 3D (`renderTree()`) wywoływać dopiero na `onmouseup`. Nie używać blokujących `alert()` (tylko `showToast`).
-  - Lokalny serwer MCP (`scripts/tree-mcp.ts`) rejestrować wyłącznie w `.agents/mcp_config.json` (bez duplikowania w `.agents/plugins/`).
+## Odwrotne modelowanie
+- Strojenie jest przyrostowe i chronione twardymi bezpiecznikami sylwetki oraz budżetu pędów.
+- Artefakty robocze trafiają tylko do `tmp/`.
+
+## Wiatr i liście
+- Ruch wiatru działa na szkielet, nie na wierzchołki siatki w przestrzeni ekranu.
+- Losowość liści jest deterministyczna i niezależna od ruchu pozostałych elementów.
+
+## Wydajność i spójność wizualna
+- Optymalizacja nie może zmieniać zachowania ani wyglądu. Inny algorytm (np. fizyka wiatru) wprowadza się jako osobną, opcjonalną ścieżkę, a nie jako „optymalizację”.
+- Najpierw mierzyć, potem optymalizować: decyzje opierać na profilu (pliki trace w `tmp/`), a nie na domysłach.
+- Warstwy pomocnicze (np. krawędzie, nakładki) muszą wynikać z tych samych danych i transformacji co obiekt główny, a nie z ich kopii.
+- Zmian wizualnych i animacyjnych nie uznaje się za zweryfikowane bez obejrzenia rzeczywistego renderu.
+
+## Narzędzia
+- Interakcje w Studio są lekkie (podgląd na bieżąco, ciężka przebudowa po zakończeniu gestu); bez blokujących okien.
+- Serwer MCP rejestrowany w jednym miejscu, bez duplikatów.
+
+## Indeks docs/
+- [architecture.md](docs/architecture.md): moduły, fasada, re-entrancy, eksporty.
+- [skeleton-continuity.md](docs/skeleton-continuity.md): niezmienniki ciągłości szkieletu.
+- [parameters-and-interpolation.md](docs/parameters-and-interpolation.md): parametry, `heightAnchors`, krzywe, zakresy.
+- [leaves.md](docs/leaves.md): obrysy liści, szypułka, rozmiar, losowość.
+- [wind.md](docs/wind.md): wiatr na szkielecie i opcjonalny oscylator.
+- [fitter.md](docs/fitter.md): narzędzia CLI, profile, bezpieczniki.
+- [testing.md](docs/testing.md): standardy testów.
+- [tree-studio-and-mcp.md](docs/tree-studio-and-mcp.md): Studio, wydajność renderu, MCP.

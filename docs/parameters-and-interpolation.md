@@ -175,3 +175,9 @@ Tree Studio udostępnia interaktywny edytor profili gatunkowych połączony z po
      - `trunkBaseRadiusRatio`: $\times 2^{0.12 \cdot \text{oct}}$,
      - `crownSpreadRatio`: $\times 2^{0.08 \cdot \text{oct}}$,
      - `trunkHeightRatio`: $\times 2^{0.08 \cdot \text{oct}}$ (w zakresie `0.05 – 0.7`).
+
+---
+
+## 5. Zakresy i wartości domyślne
+
+Domyślne wartości i zakresy `[min, max]` (przycięcie krzywej, liczby całkowite) są zdefiniowane wyłącznie w `src/core/paramSpec.ts`. Krzywa z `fitParameterCurve` obowiązuje także w samych węzłach (bez skoku do surowego węzła); poniżej najniższego węzła jest liniową kontynuacją stycznej krzywej w `h0`, powyżej ostatniego (> 24 m) kontynuacją logarytmiczną z nachyleniem krzywej w `hN`.
