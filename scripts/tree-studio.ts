@@ -13,6 +13,7 @@ import * as esbuild from 'esbuild';
 import { SPECIES_PROFILES as BASE_PROFILES } from '../src/core/speciesProfiles';
 import { normalizeTaper } from '../src/core/growthEngine';
 import { treeKindParams as baseKindParams } from '../src/core/treeSpeciesRegistry';
+import { listAssertionSummaries, readAssertionModel, writeAssertionModel } from './assertionStore';
 
 const PORT = Number(process.env.PORT ?? 4173);
 const HOST = '127.0.0.1';
@@ -1777,6 +1778,24 @@ async function main() {
       });
       return;
     }
+    if (req.url?.startsWith('/api/assertion-model') && req.method === 'GET') {
+      const u = new URL(req.url, 'http://x');
+      try {
+        if (u.pathname === '/api/assertion-models') {
+          resHttp.writeHead(200, { 'Content-Type': 'application/json' });
+          resHttp.end(JSON.stringify(listAssertionSummaries()));
+        } else {
+          const kind = u.searchParams.get('kind');
+          if (!kind) throw new Error('Brak parametru kind');
+          resHttp.writeHead(200, { 'Content-Type': 'application/json' });
+          resHttp.end(JSON.stringify(readAssertionModel(kind)));
+        }
+      } catch (err: any) {
+        resHttp.writeHead(400, { 'Content-Type': 'application/json' });
+        resHttp.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
     if (req.url === '/api/save-profile' && req.method === 'POST') {
       let body = '';
       req.on('data', (c) => (body += c));
@@ -1835,8 +1854,10 @@ async function main() {
           }
           entry.heightAnchors.sort((a: any, b: any) => a.h - b.h);
           fs.writeFileSync(FITTED_PATH, JSON.stringify(fitted, null, 2) + '\n');
+          // Model asercyjny (12 m, ziarno 1111) odnawiany przy każdym zapisie definicji
+          const assertion = writeAssertionModel(kind, fitted);
           resHttp.writeHead(200, { 'Content-Type': 'application/json' });
-          resHttp.end(JSON.stringify({ ok: true }));
+          resHttp.end(JSON.stringify({ ok: true, assertion }));
         } catch (err: any) {
           resHttp.writeHead(400, { 'Content-Type': 'application/json' });
           resHttp.end(JSON.stringify({ ok: false, error: err.message }));

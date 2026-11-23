@@ -238,6 +238,10 @@ describe('Tree Studio E2E', () => {
 
   it('POST /api/save-profile on real tree-studio server persists changes to fittedProfiles.json', async () => {
     const originalContent = fs.readFileSync(FITTED_PATH, 'utf8');
+    const ASSERT_DIR = path.resolve(CURRENT_DIR, '../../assertion-models');
+    const horseFile = path.join(ASSERT_DIR, 'Horsechestnut.json');
+    const synthFile = path.join(ASSERT_DIR, '__E2E_TEST_KIND__.json');
+    const horseBackup = fs.existsSync(horseFile) ? fs.readFileSync(horseFile, 'utf8') : null;
     const port = 4199;
     let serverProc: ChildProcess | null = null;
 
@@ -287,7 +291,15 @@ describe('Tree Studio E2E', () => {
 
       expect(res.status).toBe(200);
       const json = (await res.json()) as { ok: boolean };
-      expect(json).toEqual({ ok: true });
+      expect(json.ok).toBe(true);
+      expect((json as any).assertion.hash).toMatch(/^[0-9a-f]{8}$/);
+      expect(fs.existsSync(horseFile)).toBe(true);
+      const apiRes = await fetch(`http://127.0.0.1:${port}/api/assertion-model?kind=Horsechestnut`);
+      const apiModel = (await apiRes.json()) as any;
+      expect(apiModel.hash).toBe((json as any).assertion.hash);
+      expect(apiModel.vertices.length).toBe(apiModel.counts.vertices * 3);
+      const listRes = await fetch(`http://127.0.0.1:${port}/api/assertion-models`);
+      expect(((await listRes.json()) as any[]).some((m) => m.kind === 'Horsechestnut')).toBe(true);
 
       const updatedRaw = JSON.parse(fs.readFileSync(FITTED_PATH, 'utf8')) as FittedEntry[];
       const updatedEntry = updatedRaw.find((f) => f.ref === 'Horsechestnut');
@@ -304,7 +316,7 @@ describe('Tree Studio E2E', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: SYNTH, startSpecies: 'POPLAR', anchors: poplarAnchors }),
       });
-      expect(await resPoplar.json()).toEqual({ ok: true });
+      expect(((await resPoplar.json()) as any).ok).toBe(true);
       const poplar = (JSON.parse(fs.readFileSync(FITTED_PATH, 'utf8')) as FittedEntry[]).find((f) => f.ref === SYNTH);
       expect(poplar?.startSpecies).toBe('POPLAR');
       expect(poplar?.heightAnchors?.map((a) => a.h)).toEqual([9, 15]);
@@ -363,6 +375,9 @@ describe('Tree Studio E2E', () => {
       expect(bgData.byFile['e2e-ref.png']).toEqual(bgPayload.byFile['e2e-ref.png']);
     } finally {
       fs.writeFileSync(FITTED_PATH, originalContent, 'utf8');
+      if (horseBackup !== null) fs.writeFileSync(horseFile, horseBackup, 'utf8');
+      else (fs as any).rmSync(horseFile, { force: true });
+      (fs as any).rmSync(synthFile, { force: true });
       if (serverProc && !serverProc.killed) {
         serverProc.kill('SIGTERM');
       }

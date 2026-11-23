@@ -101,3 +101,16 @@ export {
   toUsiTreeSpec,
   type FittedProfileEntry,
 } from './profiles/index.js';
+
+export {
+  ASSERTION_HEIGHT,
+  ASSERTION_SEED,
+  buildAssertionModel,
+  summarizeAssertionModel,
+  hashParams,
+  encodeFloat32Base64,
+  decodeFloat32Base64,
+  type AssertionModel,
+  type AssertionModelSummary,
+  type AssertionModelOptions,
+} from './core/assertionModel.js';

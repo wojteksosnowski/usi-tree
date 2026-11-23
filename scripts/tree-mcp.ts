@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { TreeGenerator } from '../src/core/TreeGenerator.js';
 import { treeKindParams, type TreeKind } from '../src/core/treeSpeciesRegistry.js';
 import { countMeshTriangles } from '../src/core/treeLod.js';
+import { readAssertionModel } from './assertionStore.js';
 import type { TrunkForm } from '../src/core/types.js';
 
 const FITTED_PATH = fileURLToPath(new URL('../src/core/fittedProfiles.json', import.meta.url));
@@ -28,6 +29,18 @@ const TOOLS = [
         seed: { type: 'number' },
       },
       required: ['kind', 'height'],
+    },
+  },
+  {
+    name: 'get_assertion_model',
+    description: 'Returns the assertion model (12 m, seed 1111) for a kind: hash, counts, bbox, params and (optionally) all vertices.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string' },
+        includeVertices: { type: 'boolean', description: 'default true' },
+      },
+      required: ['kind'],
     },
   },
   {
@@ -78,6 +91,14 @@ function handleToolCall(name: string, args: any) {
       bounds: res.bounds,
       whRatio: Number(((res.bounds.crownRadius * 2) / Math.max(1e-6, res.bounds.height)).toFixed(3)),
     };
+  }
+  if (name === 'get_assertion_model') {
+    const m = readAssertionModel(args.kind);
+    if (args.includeVertices === false) {
+      const { vertices: _v, ...summary } = m;
+      return summary;
+    }
+    return m;
   }
   if (name === 'check_branch_continuity') {
     const params = treeKindParams(args.kind as TreeKind, args.height);
