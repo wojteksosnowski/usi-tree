@@ -44,6 +44,8 @@ export interface TreeGenerationParams {
    * Normalne wierzchołków nadal wskazują na zewnątrz od osi. Domyślnie (brak) siatka bez zmian. Działa także z `lod`.
    */
   reverseRingDirection?: boolean | readonly number[];
+  /** Opt-in: dołącz `windStem` (indeks pędu na wierzchołek) do siatki dla modelu oscylatorów; siatka bez zmian */
+  windSkin?: boolean;
   windAttributes?: boolean;     // Dołącz atrybut `windData` do siatki (wiatr w vertex shaderze, np. `applyTreeWind` z `usi-tree/three`); siatka bez zmian
 }
 
@@ -147,6 +149,8 @@ export interface RawTreeMesh {
    * y = faza pędu [0, 2π), z = trzepot (1 listowie, 0 kora). Zginanie całego pnia shader liczy z wysokości.
    */
   windData?: Float32Array;
+  /** Indeks pędu szkieletu na wierzchołek (tylko przy `windSkin: true`; -1 = listowie). Wejście dla `deformVertices` (`windOscillator.ts`). */
+  windStem?: Float32Array;
   boundingBox: {
     min: [number, number, number];
     max: [number, number, number];
@@ -301,4 +305,32 @@ export interface TreeSkeleton {
   uniformStroke?: boolean;
   /** Pamięć podręczna wiatru: punkt zaczepienia każdego pędu na rodzicu (wyliczana leniwie, zależy tylko od topologii) */
   windParents?: Array<{ pIdx: number; seg: number; u: number } | null>;
+}
+
+/** Platforma wiatru oscylatorów: dane liczone raz na drzewo (patrz `windOscillator.ts`). Wszystkie tablice w metrach. */
+export interface WindRig {
+  stemCount: number;
+  scale: number;
+  height: number;
+  strength: number;
+  windX: number;
+  windZ: number;
+  /** Kolejność topologiczna rodzic → dziecko */
+  order: Int32Array;
+  parent: Int32Array;      // -1 = korzeń
+  attachSeg: Int32Array;
+  attachU: Float64Array;
+  level: Int32Array;
+  ptStart: Int32Array;     // n+1, przesunięcia w `pts`/`arc` (w punktach)
+  pts: Float64Array;       // 3 * liczba punktów, położenie spoczynkowe [m]
+  arc: Float64Array;       // ułamek długości łukowej pędu w każdym punkcie, 0..1
+  length: Float64Array;    // L [m]
+  radius: Float64Array;    // r u nasady [m]
+  freqHz: Float64Array;
+  omega: Float64Array;     // rad/s
+  amp: Float64Array;       // A [rad], kąt styczny końca pędu
+  phase: Float64Array;
+  axis: Float64Array;      // 3n, jednostkowa oś gięcia (dodatni kąt = z wiatrem)
+  /** Bufor roboczy linii środkowych (własny dla rigu) */
+  work: Float64Array;
 }

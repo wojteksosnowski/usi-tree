@@ -117,3 +117,14 @@ export {
   type AssertionModelSummary,
   type AssertionModelOptions,
 } from './core/assertionModel.js';
+
+export {
+  prepareWindRig,
+  evaluateWindRig,
+  deformVertices,
+  computeWindStemS,
+  skeletonWithWindRig,
+  WIND_TRANSFORM_STRIDE,
+  type WindRigOptions,
+} from './core/windOscillator.js';
+export type { WindRig } from './core/types.js';

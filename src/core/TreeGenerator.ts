@@ -197,7 +197,7 @@ export class TreeGenerator {
     skeleton: TreeSkeleton,
     params: Pick<
       TreeGenerationParams,
-      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes' | 'onStem' | 'reverseRingDirection'
+      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes' | 'windSkin' | 'onStem' | 'reverseRingDirection'
     >
   ): TreeRawGeometryResult {
     const activeSkeleton = params.wind && params.wind.strength > 0
@@ -227,6 +227,8 @@ export class TreeGenerator {
     const builder = new MeshBufferBuilder();
     const windTags = params.windAttributes ?? false;
     if (windTags) builder.enableWind();
+    const windSkin = params.windSkin ?? false;
+    if (windSkin) builder.enableWindSkin();
     const stroke = params.stroke;
     const trunkR = stroke ? TreeGenerator.trunkBaseRadius(stems) : Infinity;
 
@@ -234,6 +236,7 @@ export class TreeGenerator {
       const s = stems[stemIdx];
       if (s.level > maxLevel) continue;
       const stemStart = builder.indices.length;
+      if (windSkin) builder.setSkinStem(stemIdx);
       if (windTags) tagWindStem(builder, s, stemIdx, scale, profile);
       const jitter = s.level === 0 ? profile.jitterStrength : profile.jitterStrength * 0.5;
       const finalStem =
@@ -296,6 +299,7 @@ export class TreeGenerator {
     }
 
     if (withFoliage) {
+      if (windSkin) builder.setSkinStem(-1);
       if (windTags) builder.setWindFoliage(windFoliageWeight(profile));
       const leafPrng = new FastPrng(skeleton.seed ^ 0x9e3779b9);
       leafPrng.skip(TreeGenerator.originalBarkDraws(stems, profile, radialSegs));
@@ -350,7 +354,7 @@ export class TreeGenerator {
    */
   private static meshSkeletonLod(
     skeleton: TreeSkeleton,
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'onStem' | 'reverseRingDirection'>,
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'windSkin' | 'onStem' | 'reverseRingDirection'>,
     lod: TreeMeshLod
   ): TreeRawGeometryResult {
     const { profile, stems, scale, height } = skeleton;
@@ -380,12 +384,15 @@ export class TreeGenerator {
     const stroke = params.stroke;
     const trunkR = stroke ? TreeGenerator.trunkBaseRadius(stems) : Infinity;
     const drawn: Stem[] = [];
-    for (const s of stems) {
+    const drawnSrc: number[] = [];
+    for (let srcIdx = 0; srcIdx < stems.length; srcIdx++) {
+      const s = stems[srcIdx];
       if (s.level > maxLevel) continue;
       const finalStem =
         stroke && !skeleton.uniformStroke ? TreeGenerator.strokeStem(s, stroke, height, trunkR, profile.twigStroke) : s;
       if (s.level > 0 && finalStem.r[0] < minRadius) continue;
       drawn.push(finalStem);
+      drawnSrc.push(srcIdx);
     }
     const ringsOf = new Map<Stem, number[]>();
     const sidesOf = (s: Stem) => (levelSides ? sidesAtLevel(s.level) : s.level === 0 ? trunkSides : branchSides);
@@ -429,10 +436,13 @@ export class TreeGenerator {
     const builder = new MeshBufferBuilder();
     const windTags = params.windAttributes ?? false;
     if (windTags) builder.enableWind();
+    const windSkin = params.windSkin ?? false;
+    if (windSkin) builder.enableWindSkin();
     for (let stemIdx = 0; stemIdx < drawn.length; stemIdx++) {
       const s = drawn[stemIdx];
       const trunk = s.level === 0;
       if (!trunk && kept && !kept.has(s)) continue;
+      if (windSkin) builder.setSkinStem(drawnSrc[stemIdx]);
       if (windTags) tagWindStem(builder, s, stemIdx, scale, profile);
       const jitter = trunk ? profile.jitterStrength : profile.jitterStrength * 0.5;
       const rings = ringsOf.get(s) ?? selectStemRings(s, tolOf(s));
@@ -463,6 +473,7 @@ export class TreeGenerator {
     }
 
     if (params.withFoliageAccents ?? false) {
+      if (windSkin) builder.setSkinStem(-1);
       if (windTags) builder.setWindFoliage(windFoliageWeight(profile));
       const field = collectLeafSites(stems, profile, skeleton.seed, skeleton.leafSites);
       if (lod.crownShell) {
@@ -515,7 +526,7 @@ export class TreeGenerator {
   static meshSkeletonLodsRaw(
     skeleton: TreeSkeleton,
     lods: readonly TreeMeshLod[],
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'reverseRingDirection'> = {}
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'windSkin' | 'reverseRingDirection'> = {}
   ): TreeLodRawResult[] {
     return lods.map((lod) => {
       const res = TreeGenerator.meshSkeletonRaw(skeleton, { ...params, lod });

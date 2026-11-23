@@ -23,6 +23,15 @@ export class GrowableBuffer<T extends Float32Array | Uint32Array> {
     this.length = i + 3;
   }
 
+  push1(x: number) {
+    if (this.length + 1 > this.a.length) {
+      const next = this.make(this.a.length * 2);
+      next.set(this.a);
+      this.a = next;
+    }
+    this.a[this.length++] = x;
+  }
+
   /** Kopia wypełnionej części */
   slice(): T {
     return this.a.slice(0, this.length) as T;
@@ -40,6 +49,9 @@ export class MeshBufferBuilder {
   vertexCount = 0;
   /** Atrybut wiatru (vec3 na wierzchołek: ugięcie gałęzi, faza, trzepot liści); null = nie zbieramy (domyślnie) */
   wind: GrowableBuffer<Float32Array> | null = null;
+  /** Indeks pędu na wierzchołek (opt-in, `windSkin`); -1 = nie należy do żadnego pędu (listowie) */
+  windStem: GrowableBuffer<Float32Array> | null = null;
+  private skinStem = -1;
   private windBaseX = 0;
   private windBaseY = 0;
   private windBaseZ = 0;
@@ -52,6 +64,16 @@ export class MeshBufferBuilder {
   /** Włącza zbieranie atrybutu `windData` (wywołać przed dodaniem wierzchołków) */
   enableWind() {
     if (!this.wind) this.wind = new GrowableBuffer(new Float32Array(1 << 15), (n) => new Float32Array(n));
+  }
+
+  /** Włącza zbieranie indeksu pędu na wierzchołek (`windStem`) */
+  enableWindSkin() {
+    if (!this.windStem) this.windStem = new GrowableBuffer(new Float32Array(1 << 14), (n) => new Float32Array(n));
+  }
+
+  /** Indeks pędu szkieletu dla kolejnych wierzchołków (-1 = brak) */
+  setSkinStem(idx: number) {
+    this.skinStem = idx;
   }
 
   /**
@@ -92,6 +114,7 @@ export class MeshBufferBuilder {
     this.groups.length = 0;
     this.vertexCount = 0;
     if (this.wind) this.wind.length = 0;
+    if (this.windStem) this.windStem.length = 0;
     this.minX = Infinity;
     this.maxX = -Infinity;
     this.minY = Infinity;
@@ -119,6 +142,7 @@ export class MeshBufferBuilder {
     this.positions.push3(x, y, z);
     this.normals.push3(nx, ny, nz);
     this.updateBounds(x, y, z);
+    if (this.windStem) this.windStem.push1(this.skinStem);
     if (this.wind) {
       let t = 0;
       if (this.windInvLen > 0) {
@@ -152,6 +176,7 @@ export class MeshBufferBuilder {
           : this.indices.slice(),
       groups: this.groups.map((g) => ({ ...g })),
       ...(this.wind ? { windData: this.wind.slice() } : {}),
+      ...(this.windStem ? { windStem: this.windStem.slice() } : {}),
       boundingBox: {
         min: [minX, minY, minZ],
         max: [maxX, maxY, maxZ],
