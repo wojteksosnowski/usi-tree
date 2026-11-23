@@ -64,7 +64,7 @@ export const TREE_LOD_PRESETS: Readonly<Record<TreeLodName, Readonly<TreeMeshLod
   far: {
     dropDeepestLevels: 3,
     minPixelsPerUnit: TREE_LOD_MIN_PIXELS_PER_UNIT_MAX.far,
-    ringTolerance: 0.006,
+    ringTolerance: 0.002,
     levelSides: [3, 2],
     maxBarkTriangles: 700,
     leafShape: 'tri',
@@ -75,7 +75,7 @@ export const TREE_LOD_PRESETS: Readonly<Record<TreeLodName, Readonly<TreeMeshLod
   shell: {
     dropDeepestLevels: 3,
     minPixelsPerUnit: TREE_LOD_MIN_PIXELS_PER_UNIT_MAX.shell,
-    ringTolerance: 0.012,
+    ringTolerance: 0.002,
     // Tylko pień (otoczka zakrywa gałęzie)
     maxBranches: 0,
     levelSides: [3],
@@ -103,7 +103,7 @@ export function countMeshTriangles(mesh: Pick<RawTreeMesh, 'groups'>): TreeMeshT
   let bark = 0,
     foliage = 0;
   for (const g of mesh.groups) {
-    if (g.materialIndex === 0) bark += g.count / 3;
+    if (g.materialIndex === 0 || g.materialIndex === 4) bark += g.count / 3;
     else foliage += g.count / 3;
   }
   return { bark, foliage, total: bark + foliage };

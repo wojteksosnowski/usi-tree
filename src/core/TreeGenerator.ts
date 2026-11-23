@@ -233,6 +233,7 @@ export class TreeGenerator {
     for (let stemIdx = 0; stemIdx < stems.length; stemIdx++) {
       const s = stems[stemIdx];
       if (s.level > maxLevel) continue;
+      const stemStart = builder.indices.length;
       if (windTags) tagWindStem(builder, s, stemIdx, scale, profile);
       const jitter = s.level === 0 ? profile.jitterStrength : profile.jitterStrength * 0.5;
       const finalStem =
@@ -291,8 +292,8 @@ export class TreeGenerator {
           revAt(s.level)
         );
       }
+      builder.addGroup(stemStart, builder.indices.length - stemStart, s.level === 0 ? 0 : 4);
     }
-    builder.addGroup(0, builder.indices.length, 0);
 
     if (withFoliage) {
       if (windTags) builder.setWindFoliage(windFoliageWeight(profile));
@@ -441,6 +442,7 @@ export class TreeGenerator {
         rings: rings.length,
         ribbon: isRibbon(s),
       });
+      const stemStart = builder.indices.length;
       if (isRibbon(s)) {
         extrudeRibbonStem(s, scale, jitter, prng, builder, rings, stemIdx, false, revAt(s.level));
       } else {
@@ -457,8 +459,8 @@ export class TreeGenerator {
           revAt(s.level)
         );
       }
+      builder.addGroup(stemStart, builder.indices.length - stemStart, s.level === 0 ? 0 : 4);
     }
-    builder.addGroup(0, builder.indices.length, 0);
 
     if (params.withFoliageAccents ?? false) {
       if (windTags) builder.setWindFoliage(windFoliageWeight(profile));

@@ -130,6 +130,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true,
 renderer.setClearColor(0x000000, 0.0);
 
 const barkMat = new THREE.MeshBasicMaterial({ color: 0xb88d66, side: THREE.DoubleSide });
+const branchMat = new THREE.MeshBasicMaterial({ color: 0x7c5838, side: THREE.DoubleSide });
 const leafMats = [
   new THREE.MeshBasicMaterial({ color: 0xa8a66e, side: THREE.DoubleSide }),
   new THREE.MeshBasicMaterial({ color: 0x7a7a42, side: THREE.DoubleSide }),
@@ -140,6 +141,187 @@ const scene = new THREE.Scene();
 const treeGroup = new THREE.Group();
 scene.add(treeGroup);
 let currentMesh: THREE.Mesh | null = null;
+
+const BARK_COLORS = [
+  { label: 'Biały (brzoza)', hex: 0xe8e4dc },
+  { label: 'Szary (buk)', hex: 0x8e9296 },
+  { label: 'Jasny brąz', hex: 0xb88d66 },
+  { label: 'Średni brąz', hex: 0x7c5838 },
+  { label: 'Ciemny brąz', hex: 0x4a3423 },
+];
+
+function getDefaultBarkIndices(kind: string): { trunk: number; branch: number } {
+  const k = kind.toUpperCase();
+  if (k.includes('BIRCH')) return { trunk: 0, branch: 4 };
+  if (k.includes('BEECH')) return { trunk: 1, branch: 1 };
+  if (k.includes('PINE')) return { trunk: 2, branch: 2 };
+  if (k.includes('OAK') || k.includes('SPRUCE') || k.includes('FIR')) return { trunk: 4, branch: 3 };
+  return { trunk: 3, branch: 3 };
+}
+
+function lerpHex(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+function sampleRamp(stops: [number, number, number][], t01: number): [number, number, number] {
+  const t = Math.max(0, Math.min(1, t01));
+  const scaled = t * (stops.length - 1);
+  const idx = Math.min(stops.length - 2, Math.floor(scaled));
+  const frac = scaled - idx;
+  return [
+    lerpHex(stops[idx][0], stops[idx + 1][0], frac),
+    lerpHex(stops[idx][1], stops[idx + 1][1], frac),
+    lerpHex(stops[idx][2], stops[idx + 1][2], frac),
+  ];
+}
+
+function getSeasonFoliagePalette(season: Season, conifer: boolean, t01: number): [number, number, number] {
+  if (conifer) {
+    if (season === 'WINTER') {
+      return sampleRamp([
+        [0x6b846e, 0x4c6652, 0x2f4335],
+        [0x5a7048, 0x3f5432, 0x26351d],
+        [0x3c5848, 0x284034, 0x172820],
+      ], t01);
+    }
+    if (season === 'SPRING') {
+      return sampleRamp([
+        [0x9cc458, 0x769e38, 0x4e6e22],
+        [0x76a244, 0x547d2d, 0x34541a],
+        [0x4f7c3c, 0x365c28, 0x203a16],
+      ], t01);
+    }
+    return sampleRamp([
+      [0x7a9a4a, 0x587630, 0x38501c],
+      [0x587c3c, 0x3e5c28, 0x263c16],
+      [0x385a38, 0x264228, 0x162818],
+    ], t01);
+  }
+  if (season === 'SPRING') {
+    return sampleRamp([
+      [0xd2e472, 0xa8c448, 0x789428],
+      [0xb4d468, 0x8cb842, 0x5c8426],
+      [0x84bc58, 0x5c9436, 0x3a6420],
+    ], t01);
+  }
+  if (season === 'AUTUMN') {
+    // Od jasno żółtego (brzozy) przez pomarańcz, czerwień do brązu (dęby)
+    return sampleRamp([
+      [0xf6e068, 0xdcb834, 0xa6821c],
+      [0xe59838, 0xc86420, 0x8a3a14],
+      [0xd64a28, 0xa82a18, 0x6e180c],
+      [0x9a5c32, 0x724020, 0x4a2812],
+    ], t01);
+  }
+  if (season === 'WINTER') {
+    return sampleRamp([
+      [0x8a7a64, 0x6a5c4a, 0x4a3e30],
+      [0x706454, 0x52483c, 0x383026],
+    ], t01);
+  }
+  return sampleRamp([
+    [0xc4c868, 0x989e40, 0x6a7026],
+    [0xa8a66e, 0x7a7a42, 0x4f4b26],
+    [0x6e9444, 0x4c6e2c, 0x2e4818],
+  ], t01);
+}
+
+const SPECIES_COLOR_STORAGE_KEY = 'usi-tree-studio-colors';
+type SpeciesColorPrefs = {
+  foliageRangeBySeason?: Partial<Record<Season, [number, number]>>;
+  trunkColorIndex?: number;
+  branchColorIndex?: number;
+};
+const speciesColorPrefs: Record<string, SpeciesColorPrefs> = (() => {
+  try { return JSON.parse(localStorage.getItem(SPECIES_COLOR_STORAGE_KEY) || '{}'); } catch { return {}; }
+})();
+
+function saveSpeciesColorPrefs() {
+  try { localStorage.setItem(SPECIES_COLOR_STORAGE_KEY, JSON.stringify(speciesColorPrefs)); } catch { /* ignore */ }
+}
+
+function seedToUnit(seed: number): number {
+  let x = (seed ^ 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b) >>> 0;
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35) >>> 0;
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967295;
+}
+
+function getFoliageRange01(kind: string, season: Season): [number, number] {
+  const r = speciesColorPrefs[kind]?.foliageRangeBySeason?.[season];
+  if (Array.isArray(r) && r.length === 2) {
+    const a = Math.max(0, Math.min(1, r[0]));
+    const b = Math.max(0, Math.min(1, r[1]));
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+  return [0.15, 0.85];
+}
+
+function setFoliageRange01(kind: string, season: Season, min01: number, max01: number) {
+  if (!speciesColorPrefs[kind]) speciesColorPrefs[kind] = {};
+  if (!speciesColorPrefs[kind].foliageRangeBySeason) speciesColorPrefs[kind].foliageRangeBySeason = {};
+  const a = Math.max(0, Math.min(1, min01));
+  const b = Math.max(0, Math.min(1, max01));
+  speciesColorPrefs[kind].foliageRangeBySeason![season] = [Math.min(a, b), Math.max(a, b)];
+  saveSpeciesColorPrefs();
+}
+
+function getFoliageSlider01(kind: string, season: Season): number {
+  const [min01, max01] = getFoliageRange01(kind, season);
+  return min01 + seedToUnit(currentSeed) * (max01 - min01);
+}
+
+function getBarkColorIndices(kind: string): { trunk: number; branch: number } {
+  const def = getDefaultBarkIndices(kind);
+  const prefs = speciesColorPrefs[kind];
+  return {
+    trunk: typeof prefs?.trunkColorIndex === 'number' ? prefs.trunkColorIndex : def.trunk,
+    branch: typeof prefs?.branchColorIndex === 'number' ? prefs.branchColorIndex : def.branch,
+  };
+}
+
+function setBarkColorIndex(kind: string, target: 'trunk' | 'branch', idx: number) {
+  if (!speciesColorPrefs[kind]) speciesColorPrefs[kind] = {};
+  if (target === 'trunk') speciesColorPrefs[kind].trunkColorIndex = idx;
+  else speciesColorPrefs[kind].branchColorIndex = idx;
+  saveSpeciesColorPrefs();
+}
+
+function applyTreeColors() {
+  const kindInfo = treeKindParams(currentKind, currentHeight);
+  const conifer = isConifer(kindInfo.species);
+  const [min01, max01] = getFoliageRange01(currentKind, currentSeason);
+  const t01 = getFoliageSlider01(currentKind, currentSeason);
+  const palette = getSeasonFoliagePalette(currentSeason, conifer, t01);
+  for (let i = 0; i < 3; i++) leafMats[i].color.setHex(palette[i]);
+  const barkIdx = getBarkColorIndices(currentKind);
+  barkMat.color.setHex((BARK_COLORS[barkIdx.trunk] ?? BARK_COLORS[3]).hex);
+  branchMat.color.setHex((BARK_COLORS[barkIdx.branch] ?? BARK_COLORS[3]).hex);
+
+  const minEl = document.getElementById('foliage-range-min') as HTMLInputElement | null;
+  const maxEl = document.getElementById('foliage-range-max') as HTMLInputElement | null;
+  const gradEl = document.getElementById('foliage-color-gradient') as HTMLElement | null;
+  const swatchEl = document.getElementById('foliage-color-swatch') as HTMLElement | null;
+  const seasonLabelEl = document.getElementById('foliage-color-season') as HTMLElement | null;
+  if (minEl) minEl.value = String(Math.round(min01 * 100));
+  if (maxEl) maxEl.value = String(Math.round(max01 * 100));
+  if (gradEl) {
+    const stops = [0, 0.33, 0.66, 1].map((s) => '#' + getSeasonFoliagePalette(currentSeason, conifer, s)[1].toString(16).padStart(6, '0'));
+    gradEl.style.background = 'linear-gradient(to right, ' + stops.join(', ') + ')';
+  }
+  if (swatchEl) swatchEl.style.background = '#' + palette[1].toString(16).padStart(6, '0');
+  if (seasonLabelEl) {
+    const names: Record<Season, string> = { SPRING: 'Wiosna', SUMMER: 'Lato', AUTUMN: 'Jesień', WINTER: 'Zima' };
+    seasonLabelEl.textContent = names[currentSeason] + (conifer ? ' (iglaste)' : ' (liściaste)');
+  }
+  document.querySelectorAll('#trunk-color-swatches .bark-swatch').forEach((b, i) => b.classList.toggle('active', i === barkIdx.trunk));
+  document.querySelectorAll('#branch-color-swatches .bark-swatch').forEach((b, i) => b.classList.toggle('active', i === barkIdx.branch));
+}
 
 const SEASON_PALETTES: Record<Season, [number, number, number]> = {
   SPRING: [0xb4d468, 0x8cb842, 0x5c8426],
@@ -185,7 +367,7 @@ function updateLeafPreview(profile: SpeciesProfile, species: string) {
   const petioleLen = profile.petioleLengthRatio ?? 0.15;
   const petioleCm = lenCm * petioleLen;
 
-  const palette = currentSeason === 'AUTUMN' && conifer ? SEASON_PALETTES.SUMMER : SEASON_PALETTES[currentSeason];
+  const palette = getSeasonFoliagePalette(currentSeason, conifer, getFoliageSlider01(currentKind, currentSeason));
   const hexColor = '#' + palette[1].toString(16).padStart(6, '0');
   const strokeColor = '#' + palette[2].toString(16).padStart(6, '0');
   const bareWinter = currentSeason === 'WINTER' && !conifer;
@@ -432,7 +614,7 @@ function applyWindDeformation(timeSec: number) {
     currentMesh.geometry.dispose();
     treeGroup.remove(currentMesh);
   }
-  currentMesh = new THREE.Mesh(toThreeBufferGeometry(rawRes.mesh), [barkMat, ...leafMats]);
+  currentMesh = new THREE.Mesh(toThreeBufferGeometry(rawRes.mesh), [barkMat, ...leafMats, branchMat]);
   treeGroup.add(currentMesh);
   lastRawMesh = rawRes.mesh;
   syncEdges();
@@ -716,9 +898,20 @@ function syncEdges() {
   clearEdges();
   const m = lastRawMesh;
   if (!m || (!edgesBark && !edgesLeaves)) return;
-  const barkCount = m.groups.length > 0 ? m.groups[0].count : m.indices.length;
-  if (edgesBark) buildEdges(m.positions, m.indices.subarray(0, barkCount), barkEdgeMat);
-  if (edgesLeaves) buildEdges(m.positions, m.indices.subarray(barkCount), leafEdgeMat);
+  if (edgesBark || edgesLeaves) {
+    const barkIdx: number[] = [];
+    const leafIdx: number[] = [];
+    for (const g of m.groups) {
+      const slice = m.indices.subarray(g.start, g.start + g.count);
+      if (g.materialIndex === 0 || g.materialIndex === 4) {
+        if (edgesBark) for (let i = 0; i < slice.length; i++) barkIdx.push(slice[i]);
+      } else if (edgesLeaves) {
+        for (let i = 0; i < slice.length; i++) leafIdx.push(slice[i]);
+      }
+    }
+    if (edgesBark && barkIdx.length) buildEdges(m.positions, new Uint32Array(barkIdx), barkEdgeMat);
+    if (edgesLeaves && leafIdx.length) buildEdges(m.positions, new Uint32Array(leafIdx), leafEdgeMat);
+  }
 }
 
 type RingStat = { level: number; sides: number; rings: number; ribbon: boolean };
@@ -756,7 +949,10 @@ function renderTree() {
   const kindInfo = treeKindParams(currentKind, currentHeight);
   const conifer = isConifer(kindInfo.species);
   const effectiveFoliage = showFoliage && !(currentSeason === 'WINTER' && !conifer);
-  const palette = currentSeason === 'AUTUMN' && conifer ? SEASON_PALETTES.SUMMER : SEASON_PALETTES[currentSeason];
+  const palette = getSeasonFoliagePalette(currentSeason, conifer, getFoliageSlider01(currentKind, currentSeason));
+  const { trunk, branch } = getBarkColorIndices(currentKind);
+  barkMat.color.setHex((BARK_COLORS[trunk] ?? BARK_COLORS[3]).hex);
+  branchMat.color.setHex((BARK_COLORS[branch] ?? BARK_COLORS[3]).hex);
   for (let i = 0; i < 3; i++) leafMats[i].color.setHex(palette[i]);
   updateLeafPreview(profile, kindInfo.species);
   if (typeof updateInlineChart === 'function') updateInlineChart();
@@ -800,7 +996,7 @@ function renderTree() {
   }
 
   const geom = toThreeBufferGeometry(rawRes.mesh);
-  currentMesh = new THREE.Mesh(geom, [barkMat, ...leafMats]);
+  currentMesh = new THREE.Mesh(geom, [barkMat, ...leafMats, branchMat]);
   treeGroup.add(currentMesh);
   lastRawMesh = rawRes.mesh;
   syncEdges();
@@ -915,7 +1111,7 @@ function measureLodPixelFill(): Record<string, number[]> | null {
       wind,
     });
     const geom = toThreeBufferGeometry(rawRes.mesh);
-    const mesh = new THREE.Mesh(geom, [barkMat, ...leafMats]);
+    const mesh = new THREE.Mesh(geom, [barkMat, ...leafMats, branchMat]);
     offscreenScene.add(mesh);
 
     const series: number[] = [];
@@ -1311,9 +1507,46 @@ function initEvents() {
     (btn as HTMLButtonElement).onclick = () => {
       currentSeason = ((btn as HTMLElement).dataset.season || 'SUMMER') as Season;
       document.querySelectorAll('.season-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      applyTreeColors();
       renderTree();
     };
   });
+
+  const minRange = document.getElementById('foliage-range-min') as HTMLInputElement | null;
+  const maxRange = document.getElementById('foliage-range-max') as HTMLInputElement | null;
+  const onRangeInput = (changed: 'min' | 'max') => {
+    if (!minRange || !maxRange) return;
+    let a = Number(minRange.value);
+    let b = Number(maxRange.value);
+    if (a > b) {
+      if (changed === 'min') { a = b; minRange.value = String(a); }
+      else { b = a; maxRange.value = String(b); }
+    }
+    setFoliageRange01(currentKind, currentSeason, a / 100, b / 100);
+    applyTreeColors();
+    const { profile } = getEffectiveProfile(currentKind, currentHeight);
+    updateLeafPreview(profile, treeKindParams(currentKind, currentHeight).species);
+  };
+  if (minRange) minRange.addEventListener('input', () => onRangeInput('min'));
+  if (maxRange) maxRange.addEventListener('input', () => onRangeInput('max'));
+
+  (['trunk', 'branch'] as const).forEach((target) => {
+    const container = document.getElementById(target === 'trunk' ? 'trunk-color-swatches' : 'branch-color-swatches');
+    if (!container) return;
+    BARK_COLORS.forEach((c, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'bark-swatch';
+      btn.title = c.label;
+      btn.style.background = '#' + c.hex.toString(16).padStart(6, '0');
+      btn.addEventListener('click', () => {
+        setBarkColorIndex(currentKind, target, idx);
+        applyTreeColors();
+      });
+      container.appendChild(btn);
+    });
+  });
+  applyTreeColors();
 
   const windChk = document.getElementById('wind-enable') as HTMLInputElement;
   const windSel = document.getElementById('wind-mode') as HTMLSelectElement;
@@ -1551,6 +1784,14 @@ const HTML_PAGE = `<!DOCTYPE html>
     .season-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .season-btn { padding: 6px 8px; border: 1px solid #d4d4d8; border-radius: 5px; background: #fff; font-size: 11px; cursor: pointer; font-weight: 600; }
     .season-btn.active { background: #16a34a; color: #fff; border-color: #16a34a; }
+    .bark-swatch { width: 20px; height: 20px; border-radius: 4px; border: 2px solid #d4d4d8; cursor: pointer; padding: 0; transition: transform 0.1s; }
+    .bark-swatch:hover { transform: scale(1.08); }
+    .bark-swatch.active { border-color: #16a34a; box-shadow: 0 0 0 2px #bbf7d0; }
+    .dual-range { position: relative; height: 22px; display: flex; align-items: center; }
+    .dual-range-track { position: absolute; left: 0; right: 0; height: 8px; border-radius: 4px; border: 1px solid #d4d4d8; }
+    .dual-range input[type="range"] { position: absolute; left: 0; width: 100%; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; height: 22px; }
+    .dual-range input[type="range"]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #18181b; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+    .dual-range input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #18181b; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
     #leaf-preview-svg { display: block; margin: 4px auto 8px auto; background: #fff; border: 1px solid #e4e2dc; border-radius: 6px; }
     .rp-meta { font-size: 11px; color: #52525b; text-align: center; line-height: 1.4; }
   </style>
@@ -1667,6 +1908,30 @@ const HTML_PAGE = `<!DOCTYPE html>
         <button class="season-btn active" data-season="SUMMER">Lato</button>
         <button class="season-btn" data-season="AUTUMN">Jesień</button>
         <button class="season-btn" data-season="WINTER">Zima</button>
+      </div>
+    </div>
+    <div class="rp-card">
+      <h2>Barwy</h2>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:600;color:#52525b;">Listowie <span id="foliage-color-season" style="font-weight:400;color:#71717a;"></span></span>
+            <span id="foliage-color-swatch" style="width:14px;height:14px;border-radius:3px;border:1px solid #a1a1aa;display:inline-block;"></span>
+          </div>
+          <div class="dual-range">
+            <div id="foliage-color-gradient" class="dual-range-track"></div>
+            <input id="foliage-range-min" type="range" min="0" max="100" step="1" value="15" />
+            <input id="foliage-range-max" type="range" min="0" max="100" step="1" value="85" />
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span style="font-weight:600;color:#52525b;">Pień</span>
+          <div id="trunk-color-swatches" style="display:flex;gap:5px;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span style="font-weight:600;color:#52525b;">Gałęzie</span>
+          <div id="branch-color-swatches" style="display:flex;gap:5px;"></div>
+        </div>
       </div>
     </div>
     <div class="rp-card">

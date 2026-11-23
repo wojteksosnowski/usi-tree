@@ -81,7 +81,7 @@ export function buildAssertionModel(kind: string, opts: AssertionModelOptions = 
   let bark = 0;
   let leaf = 0;
   for (const g of mesh.groups) {
-    if (g.materialIndex === 0) bark += g.count / 3;
+    if (g.materialIndex === 0 || g.materialIndex === 4) bark += g.count / 3;
     else leaf += g.count / 3;
   }
   if (mesh.groups.length === 0) bark = idx.length / 3;

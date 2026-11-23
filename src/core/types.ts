@@ -258,6 +258,9 @@ export interface SpeciesProfile {
   trunkForkCount?: number;       // Liczba odgałęzień rozwidlenia szczytowego pnia (domyślnie 2)
   trunkForkAsymmetry?: number;   // Asymetria widełek pnia FORKED (0–1, domyślnie 0): przewodnik główny bliżej pionu i grubszy, boczny cieńszy, krótszy, odchylony mocniej (młode okazy)
   trunkForkHeightRatio?: number; // Wysokość rozwidlenia pnia FORKED / wysokość (domyślnie: min(0.9·trunkHeightRatio, 0.18–0.35 losowo))
+  foliageColorBySeason?: Partial<Record<'SPRING' | 'SUMMER' | 'AUTUMN' | 'WINTER', number>>;
+  trunkColorIndex?: number;
+  branchColorIndex?: number;
   // Porządek struktury korony (brak pola = dotychczasowy wynik; komplet w TIDY_STRUCTURE)
   trunkForkSideLength?: number;  // FORKED: mnożnik długości bocznego przewodnika (bazowo 1 − 0,3·asymetria głównego)
   trunkForkSideRadius?: number;  // FORKED: mnożnik promienia bocznego przewodnika (bazowo 0,72 − 0,25·asymetria szczytu pnia)
