@@ -150,7 +150,9 @@ export function extrudeStem(
    * LOD: zakończenie tuby — `cone`: płaski stożek na ostatnim pierścieniu (jak dotąd), `open`: bez zamknięcia,
    * `spike`: ostatni pierścień zastąpiony wierzchołkiem (pęd zbiega się w szpic; o połowę mniej trójkątów na krótkim pędzie)
    */
-  end: 'cone' | 'open' | 'spike' = 'cone'
+  end: 'cone' | 'open' | 'spike' = 'cone',
+  /** Odwrócenie kierunku pierścienia (lustrzana kolejność kątów; normalne nadal na zewnątrz) */
+  reverse = false
 ) {
   const n = stem.px.length;
   let rings: number[];
@@ -185,9 +187,10 @@ export function extrudeStem(
     for (let j = 0; j < sides; j++) {
       const c = cosT[j],
         s = sinT[j];
-      const nx = sx * c + ux * s,
-        ny = sy * c + uy * s,
-        nz = sz * c + uz * s;
+      const sg = reverse ? -s : s;
+      const nx = sx * c + ux * sg,
+        ny = sy * c + uy * sg,
+        nz = sz * c + uz * sg;
       const rr = jitter > 0 ? r * (1 + prng.signedRange(jitter)) : r;
       builder.addVertex(cx + nx * rr, cy + ny * rr, cz + nz * rr, nx, ny, nz);
     }
@@ -223,7 +226,8 @@ export function extrudeRibbonStem(
   builder: MeshBufferBuilder,
   rings: readonly number[],
   stemIdx = 0,
-  doubleFace = false
+  doubleFace = false,
+  reverse = false
 ) {
   if (rings.length < 2) return;
   const ringCount = rings.length - 1;
@@ -268,8 +272,13 @@ export function extrudeRibbonStem(
     builder.addVertex(cx - rx * rr1, cy - ry * rr1, cz - rz * rr1, nx, ny, nz);
 
     if (prevRingStart >= 0) {
-      builder.indices.push3(prevRingStart, ringStart + 1, prevRingStart + 1);
-      builder.indices.push3(prevRingStart, ringStart, ringStart + 1);
+      if (reverse) {
+        builder.indices.push3(prevRingStart, prevRingStart + 1, ringStart + 1);
+        builder.indices.push3(prevRingStart, ringStart + 1, ringStart);
+      } else {
+        builder.indices.push3(prevRingStart, ringStart + 1, prevRingStart + 1);
+        builder.indices.push3(prevRingStart, ringStart, ringStart + 1);
+      }
       if (doubleFace) {
         builder.indices.push3(prevRingStart, prevRingStart + 1, ringStart + 1);
         builder.indices.push3(prevRingStart, ringStart + 1, ringStart);
@@ -282,7 +291,8 @@ export function extrudeRibbonStem(
   const last = rings[rings.length - 1];
   const tip = builder.vertexCount;
   builder.addVertex(stem.px[last] * scale, stem.py[last] * scale, stem.pz[last] * scale, 0, 1, 0);
-  builder.indices.push3(prevRingStart, tip, prevRingStart + 1);
+  if (reverse) builder.indices.push3(prevRingStart, prevRingStart + 1, tip);
+  else builder.indices.push3(prevRingStart, tip, prevRingStart + 1);
   if (doubleFace) {
     builder.indices.push3(prevRingStart, prevRingStart + 1, tip);
   }

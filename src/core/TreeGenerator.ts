@@ -197,7 +197,7 @@ export class TreeGenerator {
     skeleton: TreeSkeleton,
     params: Pick<
       TreeGenerationParams,
-      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes' | 'onStem'
+      'radialSegments' | 'withFoliageAccents' | 'detail' | 'stroke' | 'lod' | 'doubleSidedTwigs' | 'wind' | 'windAttributes' | 'onStem' | 'reverseRingDirection'
     >
   ): TreeRawGeometryResult {
     const activeSkeleton = params.wind && params.wind.strength > 0
@@ -219,6 +219,8 @@ export class TreeGenerator {
     const tolL1 = detail === 'HIGH' ? 0.0015 : detail === 'MEDIUM' ? 0.003 : 0.005;
     const tolL2 = detail === 'HIGH' ? 0.004 : detail === 'MEDIUM' ? 0.008 : 0.010;
     const tolL3 = detail === 'HIGH' ? 0.008 : 0.016;
+    const rr = params.reverseRingDirection;
+    const revAt = (level: number) => (rr === true ? level === 0 : Array.isArray(rr) ? rr.includes(level) : false);
     const doubleFace = params.doubleSidedTwigs ?? false;
 
     // Progresywna redukcja: L0 pełna tuba, L1-L2 decymacja cięciwą + szpic, L3+ skręcana wstęga 2-wierzchołkowa
@@ -238,7 +240,7 @@ export class TreeGenerator {
 
       if (s.level === 0) {
         params.onStem?.({ level: 0, sides: radialSegs, rings: finalStem.r.length, ribbon: false });
-        extrudeStem(finalStem, scale, radialSegs, jitter, 1, barkPrng, builder, undefined, 'cone');
+        extrudeStem(finalStem, scale, radialSegs, jitter, 1, barkPrng, builder, undefined, 'cone', revAt(0));
       } else if (s.level === 1) {
         const ringsL1 = selectStemRings(finalStem, tolL1 * unit);
         params.onStem?.({ level: 1, sides: radialSegs, rings: ringsL1.length, ribbon: false });
@@ -251,14 +253,15 @@ export class TreeGenerator {
           barkPrng,
           builder,
           ringsL1,
-          'spike'
+          'spike',
+          revAt(1)
         );
       } else if (s.level === 2) {
         const rings = selectStemRings(finalStem, tolL2 * unit);
         const ribbon2 = deepest === 2 && detail === 'MEDIUM';
         params.onStem?.({ level: 2, sides: ribbon2 ? 2 : Math.max(3, radialSegs - 1), rings: rings.length, ribbon: ribbon2 });
         if (ribbon2) {
-          extrudeRibbonStem(finalStem, scale, jitter, barkPrng, builder, rings, stemIdx, doubleFace);
+          extrudeRibbonStem(finalStem, scale, jitter, barkPrng, builder, rings, stemIdx, doubleFace, revAt(2));
         } else {
           extrudeStem(
             finalStem,
@@ -269,7 +272,8 @@ export class TreeGenerator {
             barkPrng,
             builder,
             rings,
-            'spike'
+            'spike',
+            revAt(2)
           );
         }
       } else {
@@ -283,7 +287,8 @@ export class TreeGenerator {
           builder,
           ringsL3,
           stemIdx,
-          doubleFace
+          doubleFace,
+          revAt(s.level)
         );
       }
     }
@@ -344,7 +349,7 @@ export class TreeGenerator {
    */
   private static meshSkeletonLod(
     skeleton: TreeSkeleton,
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'onStem'>,
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'onStem' | 'reverseRingDirection'>,
     lod: TreeMeshLod
   ): TreeRawGeometryResult {
     const { profile, stems, scale, height } = skeleton;
@@ -418,6 +423,8 @@ export class TreeGenerator {
       }
     }
 
+    const rr = params.reverseRingDirection;
+    const revAt = (level: number) => (rr === true ? level === 0 : Array.isArray(rr) ? rr.includes(level) : false);
     const builder = new MeshBufferBuilder();
     const windTags = params.windAttributes ?? false;
     if (windTags) builder.enableWind();
@@ -435,7 +442,7 @@ export class TreeGenerator {
         ribbon: isRibbon(s),
       });
       if (isRibbon(s)) {
-        extrudeRibbonStem(s, scale, jitter, prng, builder, rings, stemIdx, false);
+        extrudeRibbonStem(s, scale, jitter, prng, builder, rings, stemIdx, false, revAt(s.level));
       } else {
         extrudeStem(
           s,
@@ -446,7 +453,8 @@ export class TreeGenerator {
           prng,
           builder,
           rings,
-          tipOf(s)
+          tipOf(s),
+          revAt(s.level)
         );
       }
     }
@@ -505,7 +513,7 @@ export class TreeGenerator {
   static meshSkeletonLodsRaw(
     skeleton: TreeSkeleton,
     lods: readonly TreeMeshLod[],
-    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes'> = {}
+    params: Pick<TreeGenerationParams, 'radialSegments' | 'withFoliageAccents' | 'stroke' | 'windAttributes' | 'reverseRingDirection'> = {}
   ): TreeLodRawResult[] {
     return lods.map((lod) => {
       const res = TreeGenerator.meshSkeletonRaw(skeleton, { ...params, lod });

@@ -38,6 +38,12 @@ export interface TreeGenerationParams {
   wind?: { strength: number; dirX?: number; dirZ?: number; time?: number };
   /** Diagnostyka: wywoływane raz na każdy wytłoczony pęd (poziom, boki w pierścieniu, liczba pierścieni, wstęga). Nie zmienia siatki. */
   onStem?: (info: { level: number; sides: number; rings: number; ribbon: boolean }) => void;
+  /**
+   * Odwraca kierunek pierścieni tub (kolejność wierzchołków wokół osi, a więc nawinięcie trójkątów i strona lica).
+   * `true` = pnie (rząd 0, także wszystkie pnie MULTI/FORKED); tablica = lista rzędów pędów do odwrócenia (np. `[0, 1]`).
+   * Normalne wierzchołków nadal wskazują na zewnątrz od osi. Domyślnie (brak) siatka bez zmian. Działa także z `lod`.
+   */
+  reverseRingDirection?: boolean | readonly number[];
   windAttributes?: boolean;     // Dołącz atrybut `windData` do siatki (wiatr w vertex shaderze, np. `applyTreeWind` z `usi-tree/three`); siatka bez zmian
 }
 
