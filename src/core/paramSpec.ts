@@ -78,7 +78,6 @@ export const SPECIES_PARAM_SPEC: Record<string, ParamSpec<SpeciesProfile>> = {
   trunkKink: { default: 3, min: 0, max: 90 },
   scaffoldLimbs: { default: 0, min: 0, max: 12, integer: true },
   trunkForkAngle: { default: 20, min: 0, max: 120 },
-  trunkForkCount: { default: 2, min: 1, max: 8, integer: true },
   trunkForkAsymmetry: { default: 0, min: 0, max: 1 },
   trunkForkHeightRatio: {
     default: (p) => (typeof p.trunkHeightRatio === 'number' ? Math.min(p.trunkHeightRatio * 0.9, 0.265) : 0.24),
@@ -89,7 +88,6 @@ export const SPECIES_PARAM_SPEC: Record<string, ParamSpec<SpeciesProfile>> = {
   trunkForkSideRadius: { default: 1, min: 0, max: 3 },
   trunkForkMainAngleScale: { default: 1, min: 0, max: 5 },
   trunkLeanScale: { default: 1, min: 0, max: 10 },
-  crownAsymmetry: { default: 0, min: 0, max: 1 },
   trunkForkTropism: { default: 2.2, min: -10, max: 10 },
   limbBreakProbability: { default: 0, min: 0, max: 1 },
   outwardBias: { default: 0, min: 0, max: 1 },

@@ -87,9 +87,8 @@ export class TreeGenerator {
     const seed = params.seed ?? (Math.floor(height * 100) + species.charCodeAt(0) * 31);
 
     const flow = params.flow ?? false;
-    const asymAz = ((((seed * 0.6180339887) % 1) + 1) % 1) * Math.PI * 2;
     const prng = new FastPrng(seed);
-    const stems = growBotanicalTree(profile, prng, params.form ?? 'SINGLE', flow, asymAz);
+    const stems = growBotanicalTree(profile, prng, params.form ?? 'SINGLE', flow);
 
     let maxY = 0;
     for (const s of stems) {

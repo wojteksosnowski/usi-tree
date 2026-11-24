@@ -259,18 +259,23 @@ export interface SpeciesProfile {
   scaffoldLimbs?: number;        // Pokrój rozpierzchły (wiąz, kasztanowiec): przewodnik kończy się w nasadzie korony i rozpada na tyle konarów głównych, z których dopiero wychodzą gałęzie
   trunkFork?: boolean;           // Rozwidlenie szczytowe przewodnika (apical leader fork) wewnątrz korony
   trunkForkAngle?: number;       // Kąt rozwidlenia szczytowego pnia (stopnie, domyślnie 20)
-  trunkForkCount?: number;       // Liczba odgałęzień rozwidlenia szczytowego pnia (domyślnie 2)
+  /** @deprecated Ignorowane (nieużywane); rozwidlenie szczytowe zawsze ma 2 odgałęzienia. */
+  trunkForkCount?: number;
   trunkForkAsymmetry?: number;   // Asymetria widełek pnia FORKED (0–1, domyślnie 0): przewodnik główny bliżej pionu i grubszy, boczny cieńszy, krótszy, odchylony mocniej (młode okazy)
   trunkForkHeightRatio?: number; // Wysokość rozwidlenia pnia FORKED / wysokość (domyślnie: min(0.9·trunkHeightRatio, 0.18–0.35 losowo))
+  /** @deprecated Ignorowane (nieużywane). */
   foliageColorBySeason?: Partial<Record<'SPRING' | 'SUMMER' | 'AUTUMN' | 'WINTER', number>>;
+  /** @deprecated Ignorowane (nieużywane przez silnik). */
   trunkColorIndex?: number;
+  /** @deprecated Ignorowane (nieużywane przez silnik). */
   branchColorIndex?: number;
   // Porządek struktury korony (brak pola = dotychczasowy wynik; komplet w TIDY_STRUCTURE)
   trunkForkSideLength?: number;  // FORKED: mnożnik długości bocznego przewodnika (bazowo 1 − 0,3·asymetria głównego)
   trunkForkSideRadius?: number;  // FORKED: mnożnik promienia bocznego przewodnika (bazowo 0,72 − 0,25·asymetria szczytu pnia)
   trunkForkMainAngleScale?: number; // FORKED: mnożnik odchylenia głównego przewodnika od osi pnia (0 = przedłużenie pnia)
   trunkLeanScale?: number;       // FORKED: mnożnik przechyłu pnia (2–5°; 0 = pion)
-  crownAsymmetry?: number;       // 0–1: konary po jednej stronie pnia dłuższe, po drugiej krótsze (bryła jednostronna — drzewo samotne, na skraju); kierunek z ziarna
+  /** @deprecated Ignorowane (nieużywane). */
+  crownAsymmetry?: number;
   trunkForkTropism?: number;     // FORKED: fototropizm przewodników po rozwidleniu (domyślnie 2,2); większy = łokieć — odejście płasko i szybki skręt ku górze
   limbBreakProbability?: number; // Udział konarów (rząd 1) złamanych: urwane tępo w 35–70% długości, bez dalszych gałęzi (stare topole)
   prune?: boolean;               // Przycinanie jak w Weber–Penn/Sapling: pęd skracany przed wzrostem, by zmieścił się w obwiedni (zamiast urywania kikutem na niej)

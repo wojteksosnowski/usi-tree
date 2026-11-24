@@ -54,7 +54,6 @@ export function normalizeTaper(profile: SpeciesProfile): SpeciesProfile {
 export class GrowthContext {
   readonly envelope: CrownEnvelope;
   readonly flow: boolean;
-  readonly asymAz: number;
 
   trunkCountScale = 1;
   clipLeaders = false;
@@ -62,10 +61,10 @@ export class GrowthContext {
   groundClearance = -Infinity;
   tmp: [number, number, number] = [0, 0, 0];
 
-  constructor(profile: SpeciesProfile, flow: boolean, asymAz: number) {
+  /** `_asymAz` jest ignorowany (zachowany dla zgodności API). */
+  constructor(profile: SpeciesProfile, flow: boolean, _asymAz?: number) {
     this.envelope = new CrownEnvelope(profile);
     this.flow = flow;
-    this.asymAz = asymAz;
   }
 
   grow(inputProfile: SpeciesProfile, prng: FastPrng, form: TrunkForm): Stem[] {
@@ -402,9 +401,6 @@ export class GrowthContext {
           len = cp.lengthRatio * length * (1 - 0.6 * t);
         }
         len *= 1 + planPrng.signedRange(cp.lengthV);
-        if (isTrunk && profile.crownAsymmetry) {
-          len *= 1 + profile.crownAsymmetry * Math.cos(az - this.asymAz);
-        }
         const tRel = (t - base) / Math.max(1e-6, 1 - base);
         const down =
           cp.downAngle + (cp.downAngleSlope ?? 0) * (1 - tRel) + planPrng.signedRange(cp.downAngleV);
@@ -785,7 +781,7 @@ export class GrowthContext {
           (cp.lengthRatio ?? 1) *
           (0.8 + tipPrng.next() * 0.3);
         const az0 = tipPrng.range(0, Math.PI * 2);
-        const numForks = profile.trunkForkCount ?? 2;
+        const numForks = 2;
         const forkR = Math.min(tipR * 0.88, Math.max(MIN_RADIUS_RATIO * 0.5, tipR * Math.pow(numForks, -0.5)));
         for (let s = 0; s < numForks; s++) {
           this.splitDir(
@@ -1073,8 +1069,8 @@ export function growBotanicalTree(
   prng: FastPrng,
   form: TrunkForm = 'SINGLE',
   flow = false,
-  asymAz = 0
+  _asymAz?: number
 ): Stem[] {
-  const ctx = new GrowthContext(profile, flow, asymAz);
+  const ctx = new GrowthContext(profile, flow);
   return ctx.grow(profile, prng, form);
 }

@@ -50,7 +50,6 @@ System generacji drzew w `usi-tree` rozdziela definicję morfologii gatunku od s
 | `scaffoldLimbs` | `number` | `0 – 8` | `0` (brak) | Liczba głównych konarów szkieletowych, na które rozpada się przewodnik w nasadzie korony (pokrój rozpierzchły). |
 | `trunkFork` | `boolean` | `true / false` | `false` | Włącza rozwidlenie szczytowe przewodnika wewnątrz korony. |
 | `trunkForkAngle` | `number` | `5 – 60` (°) | `20` (szczyt) / `32` (`FORKED`) | Kąt rozwidlenia przewodnika. |
-| `trunkForkCount` | `number` | `2 – 5` | `2` | Liczba odgałęzień rozwidlenia szczytowego pnia. |
 | `trunkForkAsymmetry` | `number` | `0 – 1` | `0` | Dla `FORKED`: asymetria widełek ($0$ = symetryczne, $1$ = główny przewodnik bliżej pionu i grubszy, boczny cieńszy i krótszy). |
 | `trunkForkHeightRatio` | `number` | `0.05 – 0.8` | `min(0.9 * trunkHeightRatio, 0.18..0.35)` | Względna wysokość rozwidlenia pnia `FORKED`. |
 | `trunkForkSideLength` | `number` | `0.2 – 1.2` | `1` | Dla `FORKED`: mnożnik długości bocznego przewodnika. |
@@ -58,7 +57,6 @@ System generacji drzew w `usi-tree` rozdziela definicję morfologii gatunku od s
 | `trunkForkMainAngleScale` | `number` | `0 – 2` | `1` | Dla `FORKED`: mnożnik odchylenia głównego przewodnika od osi pnia (`0` = przedłużenie pnia). |
 | `trunkLeanScale` | `number` | `0 – 2` | `1` | Dla `FORKED`: mnożnik przechyłu pnia (`2–5°`; `0` = pion). |
 | `trunkForkTropism` | `number` | `0 – 5` | `2.2` (w `FORKED`) | Fototropizm przewodników po rozwidleniu (`FORKED`); większy daje efekt „łokcia”. |
-| `crownAsymmetry` | `number` | `0 – 1` | `0` | Jednostronne wydłużenie konarów po jednej stronie pnia i skrócenie po przeciwnej (kierunek losowany z ziarna). |
 
 ---
 

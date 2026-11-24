@@ -42,6 +42,7 @@ import {
   resolveNumericParam,
   scaleProfileByHeight,
 } from '${path.resolve('src/core/heightProfile').replace(/\\/g, '/')}';
+import { paramRange } from '${path.resolve('src/core/paramSpec').replace(/\\/g, '/')}';
 import { CrownEnvelope, crownRatio } from '${path.resolve('src/core/crownEnvelope').replace(/\\/g, '/')}';
 import { countMeshTriangles, TREE_LOD_PRESETS } from '${path.resolve('src/core/treeLod').replace(/\\/g, '/')}';
 import type { SpeciesProfile, TrunkForm, TreeDetail, TreeMeshLod, CrownShape } from '${path.resolve('src/core/types').replace(/\\/g, '/')}';
@@ -478,6 +479,31 @@ function updateLeafPreview(profile: SpeciesProfile, species: string) {
 
 let lastChartTarget: { sectionTitle: string; label: string } = { sectionTitle: 'Pień i korona', label: 'trunkHeightRatio' };
 
+function setParamValue(p: SpeciesProfile, sectionTitle: string, label: string, v: number): boolean {
+  const m = sectionTitle.match(/L(\\d+)/);
+  if (m) {
+    const lvl = p.levels?.[parseInt(m[1], 10) - 1];
+    if (!lvl) return false;
+    (lvl as any)[label] = v;
+  } else {
+    (p as any)[label] = v;
+  }
+  return true;
+}
+
+/** Punkt wolno przeciągać tylko, gdy zapis i odczyt dają tę samą wartość (parametry proste, nie wyliczane). */
+function isChartParamDraggable(sectionTitle: string, label: string): boolean {
+  const map = getAnchorMap(currentKind);
+  const first = [...map.entries()].sort((a, b) => a[0] - b[0])[0];
+  if (!first) return false;
+  const probe = structuredClone(first[1]);
+  const cur = getParamValue(probe, sectionTitle, label, first[0]);
+  if (cur === undefined) return false;
+  const test = cur + 0.5;
+  if (!setParamValue(probe, sectionTitle, label, test)) return false;
+  return getParamValue(probe, sectionTitle, label, first[0]) === test;
+}
+
 function getParamValue(p: SpeciesProfile, sectionTitle: string, label: string, heightM = currentHeight): number | undefined {
   const m = sectionTitle.match(/L(\\d+)/);
   const levelIdx = m ? parseInt(m[1], 10) - 1 : null;
@@ -523,14 +549,25 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   baseSize: 'Ułamek długości rodzica, od którego zaczynają wyrastać gałęzie tego poziomu.',
 };
 
-function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle: string, label: string, W: number, H: number) {
+type ChartGeom = { W: number; H: number; P: { l: number; r: number; t: number; b: number }; minY: number; maxY: number; sectionTitle: string; label: string; draggable: boolean };
+let lastChartGeom: ChartGeom | null = null;
+
+function renderChartInto(
+  svgEl: HTMLElement,
+  titleEl: HTMLElement,
+  sectionTitle: string,
+  label: string,
+  W: number,
+  H: number,
+  opts?: { override?: { h: number; y: number }; frozen?: { minY: number; maxY: number } }
+) {
   const map = getAnchorMap(currentKind);
   const heights = [...map.keys()].sort((a, b) => a - b);
   const pts: { h: number; y: number }[] = [];
   for (const h of heights) {
     const prof = map.get(h)!;
     const y = getParamValue(prof, sectionTitle, label, h);
-    if (y !== undefined) pts.push({ h, y });
+    if (y !== undefined) pts.push({ h, y: opts?.override && opts.override.h === h ? opts.override.y : y });
   }
   if (pts.length === 0) {
     titleEl.textContent = label + ' (brak węzłów)';
@@ -542,18 +579,25 @@ function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle:
   const minH = Math.min(...pts.map((p) => p.h), currentHeight);
   const maxH = Math.max(...pts.map((p) => p.h), currentHeight, 30);
   const samples: { h: number; y: number }[] = [];
+  const pr = paramRange(label);
   for (let i = 0; i <= 60; i++) {
     const h = minH + ((maxH - minH) * i) / 60;
-    samples.push({ h, y: fit.eval(h) });
+    samples.push({ h, y: Math.min(pr.max, Math.max(pr.min, fit.eval(h))) });
   }
   const effProf = getEffectiveProfile(currentKind, currentHeight).profile;
   const curY = getParamValue(effProf, sectionTitle, label) ?? evalParameterCurve(fit, currentHeight, label);
   const allY = [...pts.map((p) => p.y), ...samples.map((s) => s.y), curY];
   let minY = Math.min(...allY);
   let maxY = Math.max(...allY);
-  if (Math.abs(maxY - minY) < 1e-9) {
-    minY -= 1;
-    maxY += 1;
+  if (opts?.frozen) {
+    minY = opts.frozen.minY;
+    maxY = opts.frozen.maxY;
+  } else if (Math.abs(maxY - minY) < 1e-9) {
+    const c = (minY + maxY) / 2;
+    const rs = pr.max - pr.min;
+    const span = Math.max(Math.abs(c) * 0.5, Number.isFinite(rs) ? rs * 0.1 : 0, 1e-3);
+    minY = c - span / 2;
+    maxY = c + span / 2;
   } else {
     const pad = (maxY - minY) * 0.12;
     minY -= pad;
@@ -575,9 +619,23 @@ function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle:
   titleEl.textContent = label + ' (' + (kindLabel[fit.kind] ?? fit.kind) + ')';
   const cxCur = sx(currentHeight).toFixed(1);
   const cyCur = sy(curY).toFixed(1);
+  const draggable = isChartParamDraggable(sectionTitle, label);
+  lastChartGeom = { W, H, P, minY, maxY, sectionTitle, label, draggable };
+  const fmtV = (y: number) => (Number.isInteger(y) ? String(y) : y.toPrecision(4));
   const ptsSvg = pts
-    .map((p) => '<circle cx="' + sx(p.h).toFixed(1) + '" cy="' + sy(p.y).toFixed(1) + '" r="4" fill="#dc2626" stroke="#fff" stroke-width="1.5" />')
+    .map((p) => {
+      const cx = sx(p.h).toFixed(1);
+      const cy = sy(p.y).toFixed(1);
+      const tip = '<title>' + p.h + ' m: ' + fmtV(p.y) + '</title>';
+      const hit = draggable ? '<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent" />' : '';
+      return '<g data-h="' + p.h + '"' + (draggable ? ' style="cursor:ns-resize"' : '') + '>' + tip + hit +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="#dc2626" stroke="#fff" stroke-width="1.5" /></g>';
+    })
     .join('');
+  const dragLabel = opts?.override
+    ? '<text x="' + Math.min(W - P.r, sx(opts.override.h) + 8).toFixed(1) + '" y="' + Math.max(P.t + 8, sy(opts.override.y) - 8).toFixed(1) +
+      '" font-size="11" font-weight="700" fill="#b91c1c">' + opts.override.h + ' m: ' + fmtV(opts.override.y) + '</text>'
+    : '';
   svgEl.innerHTML =
     '<line x1="' + P.l + '" y1="' + (H - P.b) + '" x2="' + (W - P.r) + '" y2="' + (H - P.b) + '" stroke="#cbd5e1" />' +
     '<line x1="' + P.l + '" y1="' + P.t + '" x2="' + P.l + '" y2="' + (H - P.b) + '" stroke="#cbd5e1" />' +
@@ -588,8 +646,99 @@ function renderChartInto(svgEl: HTMLElement, titleEl: HTMLElement, sectionTitle:
     '<path d="' + pathD + '" fill="none" stroke="#16a34a" stroke-width="2" />' +
     '<line x1="' + cxCur + '" y1="' + P.t + '" x2="' + cxCur + '" y2="' + (H - P.b) + '" stroke="#2563eb" stroke-dasharray="3 3" />' +
     '<circle cx="' + cxCur + '" cy="' + cyCur + '" r="4" fill="#2563eb" />' +
-    ptsSvg;
+    ptsSvg + dragLabel;
   return true;
+}
+
+let chartDragWired = false;
+function wireChartDrag(svgEl: HTMLElement, notify: (msg: string, isError?: boolean) => void) {
+  if (chartDragWired) return;
+  chartDragWired = true;
+  let drag: { h: number; pointerId: number; section: string; label: string; frozen: { minY: number; maxY: number }; value: number; moved: boolean } | null = null;
+
+  const valueFromEvent = (e: PointerEvent, g: ChartGeom): number => {
+    const rect = svgEl.getBoundingClientRect();
+    const yPx = ((e.clientY - rect.top) / rect.height) * g.H;
+    const frac = (g.H - g.P.b - yPx) / Math.max(1e-6, g.H - g.P.t - g.P.b);
+    let v = g.minY + frac * (g.maxY - g.minY);
+    const r = paramRange(g.label);
+    v = Math.min(r.max, Math.max(r.min, v));
+    return r.integer ? Math.round(v) : v;
+  };
+  const redraw = (override?: { h: number; y: number }) => {
+    if (!drag) return;
+    const titleEl = document.getElementById('inline-chart-title');
+    if (titleEl) renderChartInto(svgEl, titleEl, drag.section, drag.label, 310, 180, { override, frozen: drag.frozen });
+  };
+  const finish = () => {
+    document.removeEventListener('keydown', onKey, true);
+    if (drag) { try { svgEl.releasePointerCapture(drag.pointerId); } catch { /* już zwolniony */ } }
+    drag = null;
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !drag) return;
+    const d = drag;
+    finish();
+    updateInlineChart(d.section, d.label);
+    notify('Anulowano przeciąganie');
+  };
+  const commit = (h: number, section: string, label: string, v: number) => {
+    const ap = getAnchorMap(currentKind).get(h);
+    if (!ap || !setParamValue(ap, section, label, v)) { notify('Nie można zapisać wartości', true); return; }
+    renderTree();
+    buildParamInputs();
+    updateInlineChart(section, label);
+  };
+
+  let lastDown: { h: number; t: number; x: number; y: number } | null = null;
+  const resetAnchor = (h: number, g: ChartGeom) => {
+    const fitted = FITTED_PROFILES.find((x) => x.ref === currentKind);
+    const baseProf = fitted?.heightAnchors?.find((a) => Math.abs(a.h - h) < 1e-6)?.profile ?? fitted?.profile ?? treeKindParams(currentKind, h).profile!;
+    const baseVal = getParamValue(baseProf, g.sectionTitle, g.label, h);
+    if (baseVal === undefined) return;
+    commit(h, g.sectionTitle, g.label, baseVal);
+    notify(h + ' m: przywrócono wartość bazową');
+  };
+  svgEl.addEventListener('pointerdown', (e: PointerEvent) => {
+    const g = lastChartGeom;
+    const node = (e.target as Element).closest?.('[data-h]');
+    if (!g || !node || e.button !== 0) return;
+    if (!g.draggable) { notify('Ten parametr jest wyliczany, nie można go przeciągać', true); return; }
+    const h = parseFloat(node.getAttribute('data-h')!);
+    const now = performance.now();
+    if (lastDown && lastDown.h === h && now - lastDown.t < 400 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6) {
+      lastDown = null;
+      e.preventDefault();
+      resetAnchor(h, g);
+      return;
+    }
+    lastDown = { h, t: now, x: e.clientX, y: e.clientY };
+    const cur = getParamValue(getAnchorMap(currentKind).get(h)!, g.sectionTitle, g.label, h);
+    if (cur === undefined) return;
+    drag = { h, pointerId: e.pointerId, section: g.sectionTitle, label: g.label, frozen: { minY: g.minY, maxY: g.maxY }, value: cur, moved: false };
+    svgEl.setPointerCapture(e.pointerId);
+    document.addEventListener('keydown', onKey, true);
+    e.preventDefault();
+  });
+  svgEl.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.pointerId || !lastChartGeom) return;
+    drag.value = valueFromEvent(e, lastChartGeom);
+    drag.moved = true;
+    redraw({ h: drag.h, y: drag.value });
+  });
+  svgEl.addEventListener('pointerup', (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const d = drag;
+    finish();
+    if (d.moved) commit(d.h, d.section, d.label, d.value);
+    else updateInlineChart(d.section, d.label);
+  });
+  svgEl.addEventListener('pointercancel', () => {
+    if (!drag) return;
+    const d = drag;
+    finish();
+    updateInlineChart(d.section, d.label);
+  });
 }
 
 function updateInlineChart(sectionTitle = lastChartTarget.sectionTitle, label = lastChartTarget.label) {
@@ -597,7 +746,10 @@ function updateInlineChart(sectionTitle = lastChartTarget.sectionTitle, label = 
   const svg = document.getElementById('inline-chart-svg');
   const titleEl = document.getElementById('inline-chart-title');
   const descEl = document.getElementById('inline-chart-desc');
-  if (svg && titleEl) renderChartInto(svg, titleEl, sectionTitle, label, 310, 180);
+  if (svg && titleEl) {
+    renderChartInto(svg, titleEl, sectionTitle, label, 310, 180);
+    wireChartDrag(svg, (msg, isErr) => (window as any).__studioToast?.(msg, isErr));
+  }
   if (descEl) descEl.textContent = PARAM_DESCRIPTIONS[label] ?? 'Parametr profilu morfologicznego drzewa.';
 }
 
@@ -1674,6 +1826,7 @@ function initEvents() {
     clearTimeout((el as any)._t);
     (el as any)._t = setTimeout(() => { el!.style.opacity = '0'; }, 2400);
   };
+  (window as any).__studioToast = showToast;
 
   document.getElementById('btn-copy')!.onclick = async () => {
     const { profile } = getEffectiveProfile(currentKind, currentHeight);
